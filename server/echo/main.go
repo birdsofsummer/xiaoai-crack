@@ -60,6 +60,20 @@ func Whoami() (Echo,error){
 	return echo,nil
 }
 
+func GetLocalIP1()(string,error){
+	ip:=""
+	conn, err := net.Dial("udp", "www.google.com.hk:80")
+	if err != nil {
+		fmt.Println(err.Error())
+		return ip,err
+	}
+	defer conn.Close()
+	ip_port:=conn.LocalAddr().String()
+	ip=strings.Split(ip_port, ":")[0]
+	//fmt.Println(ip)
+	return ip,nil
+}
+
 func GetLocalIP() (map[string]string){
 	var result map[string]string
 	result = make(map[string]string)
@@ -112,6 +126,9 @@ func Test1(){
 func Test2(){
 	ip:=GetLocalIP() 
 	fmt.Println(ip)
+
+	ip1,_:=GetLocalIP1()
+	fmt.Println(ip1)
 }
 
 func Main() {
