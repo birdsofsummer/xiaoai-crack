@@ -1,0 +1,6 @@
+'miio' @efe16487
+	"renew":{}
+	"register":{"ssid":"String","psk":"String","uid":"String","country":"String"}
+	"drop":{}
+	"token_write":{"token":"String","session_id":"String","ttl":"String"}
+	"miio_restore_status":{}

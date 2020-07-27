@@ -1,0 +1,5 @@
+'ai_crontab' @c85e9773
+	"new":{"personal_skill":"String"}
+	"notify":{"src":"String","event":"String","id":"String"}
+	"remove_all":{}
+	"dump":{"busy":"Integer","free":"Integer"}

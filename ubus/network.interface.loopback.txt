@@ -1,0 +1,11 @@
+'network.interface.loopback' @30102251
+	"up":{}
+	"down":{}
+	"status":{}
+	"prepare":{}
+	"dump":{}
+	"add_device":{"name":"String","link-ext":"Boolean"}
+	"remove_device":{"name":"String","link-ext":"Boolean"}
+	"notify_proto":{}
+	"remove":{}
+	"set_data":{}

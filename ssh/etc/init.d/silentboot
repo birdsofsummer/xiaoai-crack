@@ -1,0 +1,73 @@
+#!/bin/sh /etc/rc.common
+
+START=99z
+
+# clear silent boot flag if set
+start() {
+	[ -x /bin/silentboot.sh ] || return 0
+
+	flag=`/bin/silentboot.sh get`
+	[ "$flag" = "0" ] && return 0
+
+	#close leds
+	ROM_TYPE=`uci -c /usr/share/mico get version.version.HARDWARE`
+	ROM_TYPE=`echo $ROM_TYPE|tr '[A-Z]' '[a-z]'`
+
+	case "$ROM_TYPE" in
+	lx01|lx05a)
+		echo 0 0 0 > /proc/ws2812/rgb0
+		;;
+	lx05)
+		echo 0 0 0 > /sys/class/leds/sunxi_led0a/brightness
+		;;
+	l07a)
+		echo 0 0 0 > /sys/class/misc/misc_dev/pwm_leds/led_ctrl
+		;;
+	lx06|l06a)
+		led_id=`lsmod | grep et6037`
+		if [ "x$led_id" == "x"  ]; then
+			for i in `seq 0 17`
+			do
+				echo $i 0x00 > /sys/devices/i2c-0/0-003a/led_rgb
+			done
+		else
+			for i in `seq 0 17`
+			do
+				echo $i 0x00 > /sys/devices/i2c-0/0-0023/led_rgb
+			done
+		fi
+		;;
+	s12)
+		echo 0 0x000000 > /sys/devices/i2c-3/3-003c/led_rgb
+		;;
+	s12a)
+		for j in `seq 0 11`
+		do
+			echo $j 0x000000 > /sys/devices/i2c-1/1-003c/led_rgb
+		done
+		;;
+	*)
+		logger -s -p 3 -t "silentboot" "no this platform $ROM_TYPE"
+		;;
+	esac
+	#end close leds
+
+	logger -s -p 3 -t "silentboot" "Booting in silent mode. clear flag now..."
+	/bin/silentboot.sh clear
+
+	result=`/bin/silentboot.sh get`
+	MAXCOUNT=3
+	count=1
+	while [ "$result" == "1" ]
+	do
+		/bin/silentboot.sh clear
+		result=`/bin/silentboot.sh get`
+		if [ "$count" -ge $MAXCOUNT ]; then
+			logger -s -p 3 -t "silentboot" "can not clear flag ..."
+			break
+		fi
+		let "count += 1"
+	done
+
+	return 0
+}

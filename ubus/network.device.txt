@@ -1,0 +1,4 @@
+'network.device' @6c48ce6a
+	"status":{"name":"String"}
+	"set_alias":{"alias":"Array","device":"String"}
+	"set_state":{"name":"String","defer":"Boolean"}

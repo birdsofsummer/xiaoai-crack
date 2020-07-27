@@ -1,0 +1,400 @@
+#!/bin/sh /etc/rc.common
+
+START=85
+
+USE_PROCD=1
+EXTRA_COMMANDS="toggle refresh mitv_on mitv_off mitv_get mic_on mic_off mic_open mic_close mic_get"
+SAI_CONFIG_PATH="/usr/share/sai" #default
+#SAI_VAD_MODE="cloud" #default
+SAI_VAD_MODE="local"
+VOIP_STATUS_IDLE="idle"
+VOIP_STATUS_BUSY="busy"
+export LED_PARENT=pns
+VOIP_FLAG=$2
+
+_start_mipns_nuance() {
+    local voip_status=$(cat /tmp/mico-voip/status)
+    mkdir -p /data/pns
+    procd_open_instance
+    if [ '2' = $voip_status ]; then
+        procd_set_param command /usr/lib/nuance/demos/mipns-nuance -V -c /usr/lib/nuance/demos/config.json
+    else
+        procd_set_param command /usr/lib/nuance/demos/mipns-nuance -c /usr/lib/nuance/demos/config.json -l
+    fi
+    procd_set_param env NUANCE_MIX_1_0_NODELIB_PATH=/usr/lib/nuance/mix-1.0/bundles
+    procd_append_param env NUANCE_ELVIS_35_2_MODEL_PATH=/usr/lib/nuance/elvis-35.2/data
+    procd_append_param env NUANCE_VOCON_4_11_MODEL_PATH=/usr/lib/nuance/vocon-4.11/models
+    procd_set_param nice
+    procd_append_param nice -10
+    procd_set_param respawn 3600 5 0
+    procd_set_param stdout 0
+    procd_set_param stderr 0
+    procd_close_instance
+}
+
+_start_mipns_soundai_prepare() {
+    local model=$(matool_get_hardware)
+    if [ 'LX01' = $model -o 'LX05A' = $model ]; then
+        if [ -d /tmp/mipns/soundai/config/ ]; then
+            rm -rf /tmp/mipns/soundai/config/*
+        else
+            mkdir -p /tmp/mipns/soundai/config/
+        fi
+        cp /usr/share/sai/sai_config.txt* /tmp/mipns/soundai/config/
+        cp /usr/share/sai/saires_midot.txt /tmp/mipns/soundai/config/
+        ln -s /usr/share/sai/saires_midot.q /tmp/mipns/soundai/config/saires_midot.q
+        ln -s /usr/share/sai/saires_midot2.q /tmp/mipns/soundai/config/saires_midot2.q
+        ln -s /usr/share/sai/saivad.q /tmp/mipns/soundai/config/saivad.q
+        ln -s /usr/share/sai/saicfg.q /tmp/mipns/soundai/config/saicfg.q
+        ln -s /usr/share/sai/wopt_4mic_midot.bin /tmp/mipns/soundai/config/wopt_4mic_midot.bin
+        SAI_CONFIG_PATH="/tmp/mipns/soundai/config"
+    fi
+}
+
+_start_mipns_soundai() {
+    local voip_status=$(/usr/bin/voip_helper -e query)
+    _start_mipns_soundai_prepare
+    procd_open_instance
+    if [ $VOIP_STATUS_IDLE != $voip_status -o "$VOIP_FLAG" == "voip" ]; then
+        if [ 'local' = $SAI_VAD_MODE ]; then
+            procd_set_param command /usr/bin/mipns-sai -c $SAI_CONFIG_PATH -l -v
+        else
+            procd_set_param command /usr/bin/mipns-sai -c $SAI_CONFIG_PATH -v
+        fi
+    else
+        if [ 'local' = $SAI_VAD_MODE ]; then
+            procd_set_param command /usr/bin/mipns-sai -c $SAI_CONFIG_PATH -l
+        else
+            procd_set_param command /usr/bin/mipns-sai -c $SAI_CONFIG_PATH
+        fi
+    fi
+    procd_set_param nice
+    procd_append_param nice -10
+    procd_set_param respawn 3600 5 0
+    procd_set_param stdout 0
+    procd_set_param stderr 0
+    procd_close_instance
+}
+
+_start_mipns_xiaomi() {
+    local voip_status=$(/usr/bin/voip_helper -e query)
+    procd_open_instance
+    if [ $VOIP_STATUS_IDLE != $voip_status -o "$VOIP_FLAG" == "voip"　]; then
+        procd_set_param command /usr/bin/mipns-xiaomi -c /usr/share/xiaomi/xaudio_engine.conf -r opus32 -l -v
+    else
+        procd_set_param command /usr/bin/mipns-xiaomi -c /usr/share/xiaomi/xaudio_engine.conf -r opus32 -l
+    fi
+    procd_set_param nice
+    procd_append_param nice -10
+    procd_set_param respawn 3600 5 0
+    procd_set_param stdout 0
+    procd_set_param stderr 0
+    procd_close_instance
+}
+
+_start_mipns_gmems() {
+    local voip_status=$(/usr/bin/voip_helper -e query)
+    procd_open_instance
+    if [ $VOIP_STATUS_IDLE != $voip_status -o "$VOIP_FLAG" == "voip" ]; then
+        procd_set_param command /usr/bin/mipns-gmems -c /usr/share/gmems/ -r opus32 -l -v
+    else
+        procd_set_param command /usr/bin/mipns-gmems -c /usr/share/gmems/ -r opus32 -l
+    fi
+    procd_set_param nice
+    procd_append_param nice -10
+    procd_set_param respawn 3600 5 0
+    procd_set_param stdout 0
+    procd_set_param stderr 0
+    procd_close_instance
+}
+
+_start_mipns_soundiot() {
+    local voip_status=$(/usr/bin/voip_helper -e query)
+    procd_open_instance
+    if [ $VOIP_STATUS_IDLE != $voip_status -o "$VOIP_FLAG" == "voip" ]; then
+        procd_set_param command /usr/bin/mipns-siot -c /usr/share/siot/ -r opus32 -l -v
+    else
+        procd_set_param command /usr/bin/mipns-siot -c /usr/share/siot/ -r opus32 -l
+    fi
+    procd_set_param nice
+    procd_append_param nice -10
+    procd_set_param respawn 3600 5 0
+    procd_set_param stdout 0
+    procd_set_param stderr 0
+    procd_close_instance
+}
+
+_start_mipns_aispeech() {
+    local voip_status=$(/usr/bin/voip_helper -e query)
+    procd_open_instance
+    if [ $VOIP_STATUS_IDLE != $voip_status -o "$VOIP_FLAG" == "voip" ]; then
+        procd_set_param command /usr/bin/mipns-aispeech -c /usr/share/aispeech/ -r opus32 -l -v
+    else
+        procd_set_param command /usr/bin/mipns-aispeech -c /usr/share/aispeech/ -r opus32 -l
+    fi
+    procd_set_param nice
+    procd_append_param nice -10
+    procd_set_param respawn 3600 5 0
+    procd_set_param stdout 0
+    procd_set_param stderr 0
+    procd_close_instance
+}
+
+_start_mipns_horizon() {
+    local voip_status=$(/usr/bin/voip_helper -e query)
+    procd_open_instance
+    if [ $VOIP_STATUS_IDLE != $voip_status -o "$VOIP_FLAG" == "voip" ]; then
+        procd_set_param command /usr/bin/mipns-horizon -c /usr/share/horizon/ -r opus32 -l -v
+    else
+        procd_set_param command /usr/bin/mipns-horizon -c /usr/share/horizon/ -r opus32 -l
+    fi
+    procd_set_param nice
+    procd_append_param nice -10
+    procd_set_param respawn 3600 5 0
+    procd_set_param stdout 0
+    procd_set_param stderr 0
+    procd_close_instance
+}
+
+start_service() {
+    local sn=$(uci -c /data/etc/ get binfo.binfo.sn);
+    local model=$(matool_get_hardware)
+    if [ 'S12A' = $model ]; then
+        if [[ '18090/981107732' = $sn ]] || [[ '18090/981107218' = $sn ]] || [[ '18090/981140781' = $sn ]]; then
+            amixer sset 'pdm dclk' 'pdm dclk 1.024m, support 8k/16k'
+            if [ -d /var/mipns/soundai/ ]; then
+                rm -rf /var/mipns/soundai/*
+            else
+                mkdir -p /var/mipns/soundai/
+            fi
+            ln -s /usr/share/sai/sai_config_16k.txt /var/mipns/soundai/sai_config.txt
+            ln -s /usr/share/sai/sai_info /var/mipns/soundai/sai_info
+            ln -s /usr/share/sai/sai_mic.q /var/mipns/soundai/sai_mic.q
+            ln -s /usr/share/sai/saires_xiaomi.q /var/mipns/soundai/saires_xiaomi.q
+            ln -s /usr/share/sai/saires_xiaomi2.q /var/mipns/soundai/saires_xiaomi2.q
+            ln -s /usr/share/sai/saivad.q /var/mipns/soundai/saivad.q
+            ln -s /usr/share/sai/wopt_6mic_xiaomi.bin /var/mipns/soundai/wopt_6mic_xiaomi.bin
+            SAI_CONFIG_PATH="/var/mipns/soundai"
+            echo soundai > /data/mipns/vendor
+        elif [ '18089/880000050' = $sn ]; then
+            amixer sset 'pdm dclk' 'pdm dclk 1.024m, support 8k/16k'
+            if [ -d /var/mipns/soundai/ ]; then
+                rm -rf /var/mipns/soundai/*
+            else
+                mkdir -p /var/mipns/soundai/
+            fi
+            ln -s /usr/share/sai/sai_config_16k.txt /var/mipns/soundai/sai_config.txt
+            ln -s /usr/share/sai/sai_info /var/mipns/soundai/sai_info
+            ln -s /usr/share/sai/sai_mic.q /var/mipns/soundai/sai_mic.q
+            ln -s /usr/share/sai/saires_xiaomi.q /var/mipns/soundai/saires_xiaomi.q
+            ln -s /usr/share/sai/saires_xiaomi2.q /var/mipns/soundai/saires_xiaomi2.q
+            ln -s /usr/share/sai/saivad.q /var/mipns/soundai/saivad.q
+            ln -s /usr/share/sai/wopt_6mic_xiaomi.bin /var/mipns/soundai/wopt_6mic_xiaomi.bin
+            SAI_CONFIG_PATH="/var/mipns/soundai"
+            echo soundai > /data/mipns/vendor
+        else
+            amixer sset 'pdm dclk' 'pdm dclk 3.072m, support 8k/16k/32k/48k'
+        fi
+    fi
+    
+    local vendor_name=$(/usr/bin/mico_vendor_helper vendor_name_get);
+    if [ "nuance" = $vendor_name ]; then
+        _start_mipns_nuance
+    elif [ "xiaomi" = $vendor_name ]; then
+        _start_mipns_xiaomi
+    elif [ "gmems" = $vendor_name ]; then
+        _start_mipns_gmems
+    elif [ "soundiot" = $vendor_name ]; then
+        _start_mipns_soundiot
+    elif [ "aispeech" = $vendor_name ]; then
+        _start_mipns_aispeech
+    elif [ "horizon" = $vendor_name ]; then
+        _start_mipns_horizon
+    elif [ "soundai" = $vendor_name ]; then
+        _start_mipns_soundai
+    else # exception
+        return
+    fi
+    ubus call pnshelper event_notify '{"src":3, "event":0}' > /dev/null 2>&1 &
+}
+
+stop_service() {
+    local vendor_name=$(/usr/bin/mico_vendor_helper vendor_name_get);
+    rm -rf /tmp/mipns/upload
+    if [ "nuance" = $vendor_name ]; then
+        rm -rf /tmp/mipns/nuance
+    elif [ "xiaomi" = $vendor_name ]; then
+        rm -rf /tmp/mipns/xiaomi
+    elif [ "gmems" = $vendor_name ]; then
+        rm -rf /tmp/mipns/gmems
+    elif [ "soundiot" = $vendor_name ]; then
+        rm -rf /tmp/mipns/soundiot
+    elif [ "aispeech" = $vendor_name ]; then
+        rm -rf /tmp/mipns/aispeech
+    elif [ "horizon" = $vendor_name ]; then
+        rm -rf /tmp/mipns/horizon
+    elif [ "soundai" = $vendor_name ]; then
+        rm -rf /tmp/mipns/soundai
+    else # exception
+        return
+    fi
+    ubus call pnshelper event_notify '{"src":3, "event":1}' > /dev/null 2>&1 &
+}
+
+service_running() {
+    [ $(pidof mipns-nuance) ] || [ $(pidof mipns-sai) ] || [ $(pidof mipns-xiaomi) ] || [ $(pidof mipns-gmems) ] || [ $(pidof mipns-siot) ] || [ $(pidof mipns-aispeech) ] || [ $(pidof mipns-horizon) ]
+}
+
+_set_volume() {
+    local MVOL="255" # max wakeup notify volume 255
+    local vol=`ubus -t1 -S call mediaplayer get_media_volume | cut -d':' -f2 |cut -d '}' -f1`
+    if [ "$vol" -gt "$MVOL" ]; then
+        # 3. tune vol if it is too loud.
+        amixer sset notifyvol "$MVOL" > /dev/null
+    else
+        amixer sset notifyvol "$vol" > /dev/null
+    fi
+}
+
+toggle() {
+    local voip_status
+    if service_running; then
+        voip_status=$(/usr/bin/voip_helper -e mute)
+        if [ $VOIP_STATUS_IDLE != $voip_status ]; then #idle
+            return
+        fi
+        stop
+        show_led 7
+        _set_volume
+        ubus -t 1 call qplayer play {\"play\":\"/usr/share/sound/mic_off.opus\"}
+        # recover mediaplayer status when mute after wakeup
+        ubus -t 1 call mediaplayer player_wakeup {\"action\":\"stop\"}
+        logger stat_points_none micolog_mic_off_count=1 > /dev/null 2>&1  &
+    else
+        voip_status=$(/usr/bin/voip_helper -e unmute)
+        if [ $VOIP_STATUS_IDLE != $voip_status ]; then
+            return
+        fi
+
+        start
+        shut_led 7
+        _set_volume
+        ubus -t 1 call qplayer play {\"play\":\"/usr/share/sound/mic_on.opus\"}
+        logger stat_points_none micolog_mic_on_count=1  > /dev/null 2>&1 &
+        ubus -t 1 call alarm micmute_remove
+    fi
+}
+
+mic_on() {
+    voip_status=$(/usr/bin/voip_helper -e unmute)
+    if [ $VOIP_STATUS_IDLE != $voip_status ]; then
+        return;
+    fi
+
+    if service_running; then
+        echo "do nothing"
+    else
+        start
+        shut_led 7
+        _set_volume
+        ubus -t 1 call qplayer play {\"play\":\"/usr/share/sound/mic_on.opus\"}
+        logger stat_points_none micolog_mic_on_count=1 > /dev/null 2>&1 &
+    fi
+
+    ubus -t 1 call alarm micmute_remove
+}
+
+mic_off() {
+    voip_status=$(/usr/bin/voip_helper -e mute)
+    if [ $VOIP_STATUS_IDLE != $voip_status ]; then
+        return;
+    fi
+
+    if service_running; then
+        stop
+        show_led 7
+        _set_volume
+        ubus -t 1 call qplayer play {\"play\":\"/usr/share/sound/mic_off.opus\"}
+        # recover mediaplayer status when mute after wakeup
+        ubus -t 1 call mediaplayer player_wakeup {\"action\":\"stop\"}
+        logger stat_points_none micolog_mic_off_count=1 > /dev/null 2>&1 &
+    else
+        echo "do nothing"
+    fi
+}
+
+mic_open() {
+    local _result=$(ubus call pnshelper event_notify "{\"src\":1,\"event\":0}")
+    echo $local _result
+    [ x"$_result" == x"" ] && exit 1
+    json_init
+    json_load "$_result"
+    json_get_var _code code
+    json_cleanup
+    echo $_code
+    [ x"$_code" == x"0" ] &&{
+        echo "open"
+        /bin/show_led 1
+        return 0
+    }
+    return 1
+}
+
+mic_close() {
+    sleep 6
+    /bin/shut_led 1
+    ubus call pnshelper event_notify '{"src":1,"event":1}'
+}
+
+
+mic_get() {
+    if service_running; then
+        echo "on"
+    else
+        echo "off"
+    fi
+}
+
+refresh() {
+    if service_running; then
+        restart
+        logger -t mipns-refresh -p 3 "Refresh pns service..."
+    fi
+}
+
+mitv_on() {
+    # set mitv wakeup on
+    if [ ! -d "/data/mipns/" ]; then
+        mkdir "/data/mipns/"
+    fi
+
+    if [ ! -d "/tmp/mipns/" ]; then
+        mkdir "/tmp/mipns/"
+    fi
+
+    echo "on" > /data/mipns/mitv
+    echo "mitv=on" > /tmp/mipns/config
+    kill -s SIGHUP $(pidof mipns-sai)
+}
+
+mitv_off() {
+    # set mitv wakeup off
+    if [ ! -d "/data/mipns/" ]; then
+        mkdir "/data/mipns/"
+    fi
+    if [ ! -d "/tmp/mipns/" ]; then
+        mkdir "/tmp/mipns/"
+    fi
+
+    echo "off" > /data/mipns/mitv
+    echo "mitv=off" > /tmp/mipns/config
+    kill -s SIGHUP $(pidof mipns-sai)
+}
+
+mitv_get() {
+    if [ -f "/data/mipns/mitv" ]; then
+        cat /data/mipns/mitv
+    else
+        echo "off"
+    fi
+}

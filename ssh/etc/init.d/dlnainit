@@ -1,0 +1,59 @@
+#!/bin/sh /etc/rc.common
+
+START=90
+
+USE_PROCD=1
+
+config_device_file() {
+    mkdir -p /data/dlna/
+    cp /usr/share/dlna/device.xml /data/dlna/
+    fname=`cat /data/bt/mibt_config.json | grep bd_name |awk -F "[\"\"]" '{print $4}'`
+    [ "$fname" == "" ] && {
+        fname="小米AI音箱-0001"
+    }
+    udn=`matool_get_device_id`
+    udn="uuid:$udn"
+    sed -i "s/\(<friendlyName>\)[^<>]*\(<\/friendlyName\)/\1$fname\2/" /data/dlna/device.xml
+    sed -i "s/\(<UDN>\)[^<>]*\(<\/UDN\)/\1$udn\2/" /data/dlna/device.xml
+    sync
+}
+
+ota_updata_deicie() {
+    oldname=`cat /data/dlna/device.xml | grep friendlyName`
+    fname=`cat /data/bt/mibt_config.json | grep bd_name |awk -F "[\"\"]" '{print $4}'`
+    [ "$fname" == "" ] && {
+        fname="小米AI音箱-0001"
+    }
+    udn=`matool_get_device_id`
+    udn="uuid:$udn"
+    [ "$oldname" != "<friendlyName>$fname</friendlyName>" ] && {
+        sed -i "s/\(<friendlyName>\)[^<>]*\(<\/friendlyName\)/\1$fname\2/" /data/dlna/device.xml
+        sed -i "s/\(<UDN>\)[^<>]*\(<\/UDN\)/\1$udn\2/" /data/dlna/device.xml
+        sync
+    }
+}
+
+start_service() {
+    if [ ! -f "/data/dlna/device.xml" ]; then
+	config_device_file
+    fi
+    ota_updata_deicie
+    procd_open_instance
+    procd_set_param command /usr/bin/dlna
+    procd_set_param respawn
+    procd_append_param respawn 3600
+    procd_append_param respawn 5
+    procd_append_param respawn 5
+    procd_close_instance
+}
+
+stop_service()
+{
+    killall -9 dlna 1>/dev/null 2>&1
+}
+
+restart()
+{
+  stop
+  start
+}

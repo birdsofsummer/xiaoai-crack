@@ -1,0 +1,12 @@
+#!/bin/sh /etc/rc.common
+
+STOP=02
+
+stop() {
+	# do log rotate before reboot
+	logger -s -p 1 -t "Lastword" "Rebooting..................."
+
+	[ -x /usr/sbin/easy_logcut ] && easy_logcut
+	sync
+}
+

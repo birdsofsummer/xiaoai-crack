@@ -1,0 +1,9 @@
+'notify' @10d3873e
+	"create":{"id":"String","level":"Integer","expire":"Integer","volume":"Integer","text":"String"}
+	"query":{"id":"String"}
+	"delete":{"id":"String"}
+	"play":{}
+	"stop":{}
+	"clean":{}
+	"status":{"level":"Integer"}
+	"set":{"level":"Integer","enable":"Integer","autoplay":"Integer","volume":"Integer"}

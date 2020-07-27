@@ -1,0 +1,6 @@
+'voip' @bb41b65d
+	"voip_signal_op":{"op":"Integer","uid":"String"}
+	"action":{"vender":"String","event":"String","contact_id":"String","number":"String","name":"String","string":"String"}
+	"cmcc_register":{"msisdn":"String","type":"String","operation":"Integer"}
+	"cmcc_unregister":{"msisdn":"String","type":"String","operation":"Integer"}
+	"cmcc_miscellaneous":{"msisdn":"String","type":"String","operation":"Integer"}

@@ -1,0 +1,7 @@
+'system' @5a550b2d
+	"board":{}
+	"info":{}
+	"reboot":{}
+	"watchdog":{"frequency":"Integer","timeout":"Integer","magicclose":"Boolean","stop":"Boolean"}
+	"signal":{"pid":"Integer","signum":"Integer"}
+	"sysupgrade":{"path":"String","prefix":"String","command":"String"}

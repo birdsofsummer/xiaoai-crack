@@ -1,0 +1,13 @@
+'mibrain' @9d7d7caa
+	"nlp_result_get":{}
+	"text_to_speech":{"text":"String","caller":"String","vendor":"String","codec":"String","volume":"Integer","save":"Integer","play":"Integer"}
+	"vendor_switch":{"vendor_name":"String"}
+	"vendor_who":{}
+	"ai_service":{"bypass":"String","caller":"String","duration":"Integer","id":"String","asr":"Integer","nlp":"Integer","tts":"Integer","asr_audio":"String","nlp_text":"String","nlp_execute":"Integer","tts_text":"String","tts_type":"String","tts_vendor":"String","tts_volume":"Integer","tts_codec":"String","tts_save":"Integer","tts_play":"Integer"}
+	"aivs_miio_token_update":{"token":"String","session_id":"String"}
+	"aivs_authorization_get":{}
+	"aivs_event_post":{"namespace":"String","name":"String","payload":"String"}
+	"aivs_track_post":{"event":"String","dialog_id":"String","extend":"String"}
+	"aivs_env_switch":{}
+	"tts_vendor_switch":{"vendor_name":"String"}
+	"tts_vendor_show":{}

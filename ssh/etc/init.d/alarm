@@ -1,0 +1,119 @@
+#!/bin/sh /etc/rc.common
+
+START=70
+
+USE_PROCD=1
+EXTRA_COMMANDS="micmute_remove sync"
+
+alarm_log() {
+    logger -t /etc/init.d/alarm[$$] -p 3 "$*"
+    echo $*
+}
+
+ubus_to_file()
+{
+  source /usr/share/libubox/jshn.sh
+  result=$(ubus call workday get_config {\"name\":\"$1\"})
+  [ x"$result" == x"" ] && {
+    alarm_log "config get $1 error, return 1"
+    return 1;
+  }
+
+  json_init 
+  json_load "$result"
+  json_get_var data_string data
+  json_cleanup
+  alarm_log "data string: "$data_string
+  [ x"$data_string" == x"" ] && {
+    alarm_log "config get $1 empty, return 1"
+    return 1;
+  }
+
+  rm -rf $2
+  for one_day in $data_string
+  do
+      echo $one_day >> $2
+  done
+  alarm_log "create file $2 success."
+}
+
+ORI_DIR="/etc/workday/"
+DEST_DIR="/data/workday/"
+FILE_HOLIDAY="unnomal_holiday.cfg"
+FILE_WORKDAY="unnomal_workday.cfg"
+country=$(uci -c /data/etc/ get binfo.binfo.country)
+file_ext="."$country
+[ "$country" == "CN" ] && {
+  alarm_log "country is CN"
+  file_ext=""
+}
+
+sync_holiday()
+{
+  rm -rf /tmp/$FILE_HOLIDAY
+  rm -rf /tmp/$FILE_WORKDAY
+  [ x"$file_ext" != x"" ] && {
+    alarm_log "try get code $country"
+    ubus_to_file $FILE_HOLIDAY$file_ext /tmp/$FILE_HOLIDAY
+    ubus_to_file $FILE_WORKDAY$file_ext /tmp/$FILE_WORKDAY
+  }
+  
+  [ ! -f /tmp/$FILE_HOLIDAY -o  ! -f /tmp/$FILE_WORKDAY ] && {
+     alarm_log "get default config CN"
+     ubus_to_file $FILE_HOLIDAY /tmp/$FILE_HOLIDAY
+     ubus_to_file $FILE_WORKDAY /tmp/$FILE_WORKDAY
+  }
+
+  [ ! -f /tmp/$FILE_HOLIDAY -o  ! -f /tmp/$FILE_WORKDAY ] && {
+    alarm_log "get default config fail, return"
+    rm -rf /tmp/$FILE_HOLIDAY
+    rm -rf /tmp/$FILE_WORKDAY 
+    return 1
+  }
+
+  rm -rf $DEST_DIR/$FILE_HOLIDAY
+  rm -rf $DEST_DIR/$FILE_WORKDAY
+  mv /tmp/$FILE_HOLIDAY $DEST_DIR/$FILE_HOLIDAY
+  mv /tmp/$FILE_WORKDAY $DEST_DIR/$FILE_WORKDAY
+
+  return 0
+}
+
+sync()
+{
+  restart
+}
+
+country_prepare()
+{
+  [ ! -f $ORI_DIR$FILE_HOLIDAY$file_ext -o ! -f $ORI_DIR$FILE_WORKDAY$file_ext ] && {
+    alarm_log "file not exist, country $country"
+    file_ext=""
+  }
+  
+  alarm_log "final file ext $file_ext, country $country"
+  ln -s -f $ORI_DIR/$FILE_HOLIDAY$file_ext $DEST_DIR/$FILE_HOLIDAY
+  ln -s -f $ORI_DIR/$FILE_WORKDAY$file_ext $DEST_DIR/$FILE_WORKDAY
+  /bin/sync
+}
+
+start_service() 
+{
+  /usr/bin/alarm_translate.sh
+  rm -rf $DEST_DIR
+  mkdir -p $DEST_DIR
+
+  country_prepare
+
+  sync_holiday
+
+  /bin/sync
+
+  procd_open_instance
+  procd_set_param command /usr/bin/alarmd
+
+  procd_set_param respawn 3600 5 0
+  procd_close_instance
+}
+
+

@@ -1,0 +1,7 @@
+'upnp-disc' @9d4924e5
+	"demo":{"mac":"String","udn":"String","select":"Integer","enable":"Integer"}
+	"lookup":{"mac":"String","udn":"String","select":"Integer","enable":"Integer"}
+	"select":{"mac":"String","udn":"String","select":"Integer","enable":"Integer"}
+	"wakeup":{"mac":"String","udn":"String","select":"Integer","enable":"Integer"}
+	"list":{"mac":"String","udn":"String","select":"Integer","enable":"Integer"}
+	"enable":{"mac":"String","udn":"String","select":"Integer","enable":"Integer"}

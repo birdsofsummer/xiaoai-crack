@@ -1,0 +1,5 @@
+'workday' @62cfc3c6
+	"get_config":{"name":"String"}
+	"get_version":{}
+	"get_ts":{}
+	"sync_config":{"force":"Boolean","check_ts":"Boolean"}

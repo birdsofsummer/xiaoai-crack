@@ -1,0 +1,12 @@
+'messagingagent' @bd5bbd4f
+	"notify":{"payload":"String"}
+	"identify_device":{}
+	"miot_push":{"payload":"String"}
+	"report_events":{"payload":"String"}
+	"add_device_log":{"mac":"String","payload":"String"}
+	"set_kv":{"key":"String","value":"String"}
+	"close":{}
+	"get_pid":{}
+	"fault":{}
+	"sync_admin":{}
+	"get_ai_service_token":{}

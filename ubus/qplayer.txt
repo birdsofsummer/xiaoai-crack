@@ -1,0 +1,2 @@
+'qplayer' @41f40184
+	"play":{"play":"String","light":"Integer"}

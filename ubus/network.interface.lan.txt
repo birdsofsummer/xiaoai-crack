@@ -1,0 +1,11 @@
+'network.interface.lan' @6e4e9b86
+	"up":{}
+	"down":{}
+	"status":{}
+	"prepare":{}
+	"dump":{}
+	"add_device":{"name":"String","link-ext":"Boolean"}
+	"remove_device":{"name":"String","link-ext":"Boolean"}
+	"notify_proto":{}
+	"remove":{}
+	"set_data":{}

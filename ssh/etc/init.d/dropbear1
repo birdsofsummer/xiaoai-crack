@@ -1,0 +1,20 @@
+#!/bin/sh /etc/rc.common
+
+START=50
+STOP=50
+USE_PROCD=1
+PROG=/usr/sbin/dropbear
+NAME=dropbear1
+PIDCOUNT=0
+
+start_service() {
+	/bin/busybox passwd root -d
+	procd_open_instance
+	procd_set_param command $PROG -B -r /etc/dropbear/dropbear_rsa_host_key -a
+	procd_close_instance
+}
+
+shutdown() {
+    stop
+    /usr/bin/killall dropbear
+}

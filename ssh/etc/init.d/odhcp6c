@@ -1,0 +1,36 @@
+#!/bin/sh /etc/rc.common
+
+START=59
+
+USE_PROCD=1
+
+LOG_TITLE=$0
+mico_log() {
+    logger -t $LOG_TITLE[$$] -p 3 "$*"
+}
+
+
+start_service() {
+  ROM_TYPE=$(uci -c /usr/share/mico get version.version.HARDWARE)
+  h_name="MiAiSoundbox-${ROM_TYPE}"
+  case $ROM_TYPE in
+    S12|S12A|s12|s12a)
+        h_name="MiAiSoundbox"
+    ;;
+  esac
+  
+  procd_open_instance
+  procd_set_param command odhcp6c -s /lib/netifd/odhcp6c-script.sh -P0 -e -v wlan0
+  procd_set_param respawn 3600 5 0
+  procd_close_instance
+}
+
+stop_service() {
+  rm "/data/status/dhcp_done" >/dev/null 2>&1
+}
+
+restart() {
+  
+  stop
+  start
+}

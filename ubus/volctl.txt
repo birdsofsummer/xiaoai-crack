@@ -1,0 +1,10 @@
+'volctl' @5015c14d
+	"setvol":{"callername":"String","softnode":"String","vol":"Integer"}
+	"setvolfine":{"callername":"String","softnode":"String","vol":"Integer"}
+	"getvol":{"callername":"String","softnode":"String"}
+	"volup":{"callername":"String","softnode":"String"}
+	"voldown":{"callername":"String","softnode":"String"}
+	"volrel":{"callername":"String","softnode":"String","vol":"Integer"}
+	"vollinerel":{"callername":"String","softnode":"String","vol":"Integer"}
+	"volline":{"callername":"String","softnode":"String","vol":"Integer"}
+	"nightmode":{"callername":"String","val":"Integer"}

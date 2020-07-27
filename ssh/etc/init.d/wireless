@@ -1,0 +1,1752 @@
+#!/bin/sh /etc/rc.common
+#author AlphaCN@gmail.com
+
+START=61
+
+USE_PROCD=1
+PROCD_DEBUG=1
+IS_SHOW_LED=1
+ROM_TYPE=$(uci -c /usr/share/mico get version.version.HARDWARE)
+HTPDATE_SYNC=1
+#BOARD_TYPE==4 : s12c
+BOARD_TYPE=`fw_env -g board_id`  1>/dev/null 2>/dev/null
+[ "$BOARD_TYPE" == "4" ] && {
+    ROM_TYPE=s12c_marvell
+}
+#BOARD_TYPE==8 : s12c
+[ x"$BOARD_TYPE" == x"8" ] && {
+    ROM_TYPE=s12c_marvell
+}
+ROM_TYPE=$(echo $ROM_TYPE|tr '[A-Z]' '[a-z]')
+logger -t wireless[$$] -p 3 "ROM TYPE $ROM_TYPE IS_SHOW_LED $IS_SHOW_LED"
+
+EXTRA_COMMANDS="ble_oauth miio_register andlink_register internet wifi post_miio post_ble boot_done  boot_start config_mode scan trylock unlock trylock_wait reset conf_create"
+EXTRA_HELP="\
+        wifi           connect wifi 
+                       format: wifi timeout　ssid password identity
+        internet       connect wifi and check internet
+        ble_oauth      ble register by oauth issue
+                       format: ble_oauth country uid ssid password identity
+        miio_register  miio register issue
+                       format: miio_register ssid password identity
+        andlink_register andlink register issue
+                       format: miio_register configfile
+        post_ble       after ble register issue
+        post_miio      after miio register issue
+        boot_done      after boot complete
+        config_mode    set device config mode.
+        scan           ssid scan issue 1:not found 2:locked 0:found
+        reset          wifi reset for s12c marvell
+        conf_create    andlink register issue
+                       format: conf_create configfile ssid password identity"
+
+WIRELESS_CONF="/data/wifi/wpa_supplicant.conf"
+LOG_TITLE="/etc/init.d/wireless"
+ANDLINK_DIR="/data/andlink/"
+wireless_log() {
+    logger -t wireless[$$] -p 3 "$*"
+    #echo $*
+}
+
+file2log()
+{
+    [ ! -f $1 ] && {
+        wireless_log "file $1 not exist."
+        return;
+    }
+
+    wireless_log "file $1 content:"
+
+    while read oneline;do 
+        wireless_log "# "$oneline
+    done < $1
+}
+
+show_led()
+{
+    wireless_log "show_led  IS_SHOW_LED $IS_SHOW_LED"
+    [ $IS_SHOW_LED -eq 1 ] && {
+        export LED_PARENT=$LOG_TITLE;
+        /bin/show_led $1 1>/dev/null 2>/dev/null
+    }
+}
+
+shut_led()
+{
+    wireless_log "shut_led  IS_SHOW_LED $IS_SHOW_LED"
+    [ $IS_SHOW_LED -eq 1 ] && {
+        export LED_PARENT=$LOG_TITLE;
+        /bin/shut_led $1 1>/dev/null 2>/dev/null
+    }
+}
+
+qplay()
+{
+    ubus call qplayer play "{\"play\":\"$1\",\"light\":3}"
+}
+
+miplay()
+{
+    show_led 3 1>/dev/null 2>/dev/null
+    miplayer -f $1 1>/dev/null 2>/dev/null
+    shut_led 3 1>/dev/null 2>/dev/null
+}
+
+#/tmp/ap_config_mode_flag
+file_create() 
+{
+    wireless_log "create file $1"
+    touch $1 > /dev/null 2>&1
+    sync
+}
+
+file_delete()
+{
+    wireless_log "delete file $1"
+    rm -f $1 > /dev/null 2>&1
+    sync
+}
+
+file_trycp()
+{
+    wireless_log "cp file $1 to $2"
+    [ ! -f "$2" ] && {
+        cp $1 $2
+        sync
+    }
+}
+
+#################################################################################################
+#platform related functions
+#################################################################################################
+SUPPORT_5G=0
+VOL_VALUE=100
+case $ROM_TYPE in
+s12|s12a|s12c_marvell)
+    VOL_VALUE=100
+    SUPPORT_5G=1
+;;
+lx01)
+    VOL_VALUE=200
+    SUPPORT_5G=0
+;;
+lx05a)
+    VOL_VALUE=225
+    SUPPORT_5G=0
+;;
+l07a)
+    VOL_VALUE=175
+    SUPPORT_5G=0
+;;
+lx05)
+    VOL_VALUE=165
+    SUPPORT_5G=0
+;;
+lx06|l06a)
+    VOL_VALUE=175
+    SUPPORT_5G=1
+;;
+esac
+
+try_insmod()
+{
+    local has_mod=""
+    has_mod=`lsmod | grep $1`
+    [ "$has_mod" == "" ] && {
+        insmod $1.ko $2
+    }
+}
+
+lx05_update_map()
+{
+    MAPFILE="/data/wifi/wifi_efuse_8723ds.map"
+    country=$(uci -c /data/etc get binfo.binfo.country)
+    country=${country:-CN}
+    #CN /TW set B8 bit 20H
+    [ "$country" == "CN" -o "$country" == "TW" ] && {
+        wireless_log "update $MAPFILE"
+        awk '{if(NR==11) $8=20; print $0}' $MAPFILE >$MAPFILE.tmp
+        mv $MAPFILE.tmp $MAPFILE
+    }
+}
+
+data_prepare()
+{
+    [ ! -d "/data/wifi" ] && mkdir -p "/data/wifi"
+
+    case $ROM_TYPE in
+    s12|s12a)
+        file_trycp /etc/wifi/nvram.txt /data/wifi/nvram.txt
+        try_insmod dhd "firmware_path=/etc/wifi/fw_bcm43455c0_ag.bin nvram_path=/data/wifi/nvram.txt config_path=/data/wifi/config.txt"
+        #wireless_log "prepare ap for $ROM_TYPE"
+
+        echo -n 2 >/sys/module/dhd/parameters/op_mode
+        break
+    ;;
+    lx01|lx05a)
+        file_trycp /lib/firmware/nv_43436p.txt /data/wifi/nv_43436p.txt
+        file_trycp /lib/firmware/nv_43438a1.txt /data/wifi/nv_43438a1.txt
+        file_trycp /lib/firmware/config.txt /data/wifi/config.txt
+        try_insmod bcmdhd
+
+        echo -n /lib/firmware/fw_bcm4343_ag.bin > /sys/module/bcmdhd/parameters/firmware_path
+        echo -n /data/wifi/ > /sys/module/bcmdhd/parameters/nvram_path
+        echo -n 2 > /sys/module/bcmdhd/parameters/op_mode
+        break;
+    ;;
+    s12c_marvell|lx06|l06a)
+        mac_wifi=$(uci -c /data/etc get binfo.binfo.mac_wifi)
+        country_code=`cat /data/wifi/config.txt | grep ccode | awk -F '=' '{print $2}'`
+        wireless_log "Read country code is $country_code"
+        country=${country:-CN}
+        try_insmod mlan
+        try_insmod sd8xxx "drv_mode=3 cfg80211_wext=0xf cal_data_cfg=mrvl/WlanCalData_ext.conf fw_name=mrvl/sdsd8977_combo_v2.bin
+            sta_name=wlan mac_addr=$mac_wifi reg_alpha2=$country_code drvdbg=0x80007 ps_mode=2 auto_ds=2"
+        #wireless_log "prepare data for $ROM_TYPE"
+    ;;
+    lx05|l07a)
+        lx05_update_map
+        try_insmod 8723ds "rtw_channel_plan=0x21"
+    ;;
+    esac
+}
+
+firmware_prepare_ap()
+{
+    [ ! -d "/data/wifi" ] && mkdir -p "/data/wifi"
+    case $ROM_TYPE in
+    s12|s12a)
+        file_trycp /etc/wifi/nvram.txt /data/wifi/nvram.txt
+        try_insmod dhd "firmware_path=/etc/wifi/fw_bcm43455c0_ag.bin nvram_path=/data/wifi/nvram.txt config_path=/data/wifi/config.txt"
+        echo -n 2 >/sys/module/dhd/parameters/op_mode
+        break
+    ;;
+    lx01|lx05a)
+        file_trycp /lib/firmware/nv_43436p.txt /data/wifi/nv_43436p.txt
+        file_trycp /lib/firmware/nv_43438a1.txt /data/wifi/nv_43438a1.txt
+        file_trycp /lib/firmware/config.txt /data/wifi/config.txt
+        try_insmod bcmdhd
+        echo -n /lib/firmware/fw_bcm4343_ag.bin > /sys/module/bcmdhd/parameters/firmware_path
+        echo -n /data/wifi/ > /sys/module/bcmdhd/parameters/nvram_path
+        echo -n 2 > /sys/module/bcmdhd/parameters/op_mode
+        break;
+    ;;
+    s12c_marvell|lx06|l06a)
+        mac_wifi=`uci -c /data/etc get binfo.binfo.mac_wifi`
+        country_code=`cat /data/wifi/config.txt | grep ccode | awk -F '=' '{print $2}'`
+        wireless_log "Read country code is $country_code"
+        country=${country:-CN}
+
+        try_insmod mlan
+        try_insmod sd8xxx "drv_mode=3 cfg80211_wext=0xf cal_data_cfg=mrvl/WlanCalData_ext.conf fw_name=mrvl/sdsd8977_combo_v2.bin
+            sta_name=wlan mac_addr=$mac_wifi reg_alpha2=$country_code drvdbg=0x80007 ps_mode=2 auto_ds=2"
+    ;;
+    lx05|l07a)
+        lx05_update_map
+        try_insmod 8723ds "rtw_channel_plan=0x21"
+    ;;
+    esac   
+}
+
+firmware_prepare_sta()
+{
+    [ ! -d "/data/wifi" ] && mkdir -p "/data/wifi"
+    case $ROM_TYPE in
+    s12|s12a)
+        file_trycp /etc/wifi/nvram.txt /data/wifi/nvram.txt
+        try_insmod dhd "firmware_path=/etc/wifi/fw_bcm43455c0_ag.bin nvram_path=/data/wifi/nvram.txt config_path=/data/wifi/config.txt"
+
+        echo -n 0 >/sys/module/dhd/parameters/op_mode
+        break;
+    ;;
+    lx01|lx05a)
+        file_trycp /lib/firmware/nv_43436p.txt /data/wifi/nv_43436p.txt
+        file_trycp /lib/firmware/nv_43438a1.txt /data/wifi/nv_43438a1.txt
+        file_trycp /lib/firmware/config.txt /data/wifi/config.txt
+        try_insmod bcmdhd
+
+        echo -n /lib/firmware/fw_bcm4343_ag.bin > /sys/module/bcmdhd/parameters/firmware_path
+        echo -n /data/wifi/ > /sys/module/bcmdhd/parameters/nvram_path
+        echo -n 0 > /sys/module/bcmdhd/parameters/op_mode
+        break;
+    ;;
+    s12c_marvell|lx06|l06a)
+        mac_wifi=`uci -c /data/etc get binfo.binfo.mac_wifi`
+        country_code=`cat /data/wifi/config.txt | grep ccode | awk -F '=' '{print $2}'`
+        wireless_log "Read country code is $country_code"
+        country=${country:-CN}
+
+        try_insmod mlan
+        try_insmod sd8xxx  "drv_mode=3 cfg80211_wext=0xf cal_data_cfg=mrvl/WlanCalData_ext.conf fw_name=mrvl/sdsd8977_combo_v2.bin
+            sta_name=wlan mac_addr=$mac_wifi reg_alpha2=$country_code drvdbg=0x80007 ps_mode=2 auto_ds=2"
+
+        #wireless_log "prepare data for $ROM_TYPE"
+        uap0_exist=`ifconfig | grep uap0`
+        [ "x$uap0_exist" != "x" ] && {
+            ifconfig uap0 down
+        }
+    ;;
+    lx05|l07a)
+        lx05_update_map
+        try_insmod 8723ds "rtw_channel_plan=0x21"
+    ;;
+    esac
+}
+
+firmware_stop()
+{
+    case $ROM_TYPE in
+    s12|s12a)
+        sleep 2
+        rmmod dhd
+        sleep 2
+        break;
+    ;;
+    lx01|lx05a)
+        sleep 2
+        rmmod bcmdhd
+        sleep 2
+        break;
+    ;;
+    s12c_marvell|lx06|l06a)
+        echo "do nothing for $ROM_TYPE"
+    ;;
+    lx05|l07a) 
+        echo "do nothing for $ROM_TYPE"
+    ;;
+    esac
+}
+
+firmware_reset()
+{
+    #not called at this time 20180830
+    return;
+
+    [ "$ROM_TYPE" == "s12c_marvell" || "$ROM_TYPE" == "lx06" || "$ROM_TYPE" == "l06a" ] && {
+        ifconfig wlan0 down
+        #/etc/init.d/bluetooth call 
+        #rmmod bt8xxx.ko       
+        rmmod mlan.ko
+        #rmmod sd8xxx.ko
+        echo 0 > /sys/class/gpio/gpio78/value
+        sleep 1
+        echo 1 > /sys/class/gpio/gpio78/value
+        sleep 1 
+    }
+}
+
+ap_model_get()
+{
+    AP_MODEL="s12"
+    case $ROM_TYPE in
+    s12|s12a|s12c_marvell)
+        AP_MODEL="s12"
+        break;
+    ;;
+    lx05a)
+        AP_MODEL="lx5a"
+        break;
+    ;;
+    l07a)
+        AP_MODEL="l7a"
+        break;
+    ;;
+    *)
+        AP_MODEL=$(echo $ROM_TYPE|tr '[A-Z]' '[a-z]')
+        break;
+    ;;
+    esac
+
+    wireless_log "ap model get $AP_MODEL"
+}
+
+wifi_signal_check_wl()
+{
+    SIGNAL_CHECK_LOG="/tmp/signal_check.log"
+    WHICH_SSID="$1"
+
+    wireless_log "waiting for signal check scan done"
+    wl scan --ssid=$WHICH_SSID
+    sleep 3
+    wl scanresults > $SIGNAL_CHECK_LOG
+    wl scanabort
+    file2log $SIGNAL_CHECK_LOG
+    wireless_log "signal check scan complete"
+    local scan_results=$(cat $SIGNAL_CHECK_LOG| grep "RSSI:" |awk -F" " '{print $4}')
+    [ -z $scan_results ] && {
+        wireless_log "ssid $1 scan fail"
+        return 2;
+    }
+
+    [ $scan_results -lt -70 ] && {
+        cp $SIGNAL_CHECK_LOG $SIGNAL_CHECK_LOG.backup
+        wireless_log "ssid $1 signal weak"
+        return 1;
+    }
+
+    return 0; 
+}
+
+wifi_signal_check_rtl()
+{
+    SIGNAL_CHECK_LOG="/tmp/signal_check.log"
+    WHICH_SSID="$1"
+
+    wireless_log "waiting for $WHICH_SSID signal check scan done"
+    iw dev wlan0 scan ssid $WHICH_SSID >$SCAN_LOG
+    local scan_results=$(cat $SCAN_LOG |grep signal |awk -F " " '{print $2}'|sed s/[[:space:]]//g)
+    [ -z $scan_results ] && {
+        wireless_log "ssid $1 scan fail"
+        return 2;
+    }
+
+    [ $scan_results -lt -70 ] && {
+        cp $SIGNAL_CHECK_LOG $SIGNAL_CHECK_LOG.backup
+        wireless_log "ssid $1 signal weak"
+        return 1;
+    }
+
+    return 0;
+}
+
+wifi_signal_check_marvell()
+{
+    SIGNAL_CHECK_LOG="/tmp/signal_check.log"
+    WHICH_SSID="$1"
+
+    wireless_log "waiting for signal check scan done"
+    mlanutl wlan0 setuserscan ssid=$WHICH_SSID >$SCAN_LOG
+    local scan_results=$(cat $SCAN_LOG |grep $WHICH_SSID |awk -F "|" '{print $3}'|sed s/[[:space:]]//g)
+    [ -z $scan_results ] && {
+        wireless_log "ssid $1 scan fail"
+        return 2;
+    }
+
+    [ $scan_results -lt -70 ] && {
+        cp $SIGNAL_CHECK_LOG $SIGNAL_CHECK_LOG.backup
+        wireless_log "ssid $1 signal weak"
+        return 1;
+    }
+
+    return 0;
+}
+
+wifi_signal_check()
+{
+    WHICH_SSID="$1"
+    wireless_log "waiting for signal check ROM_TYPE $ROM_TYPE"
+    case $ROM_TYPE in
+    s12|s12a|lx01|lx05a)
+        wifi_signal_check_wl $WHICH_SSID
+        return $?
+    ;;
+    s12c_marvell|lx06|l06a)
+        #wifi_signal_check_marvell
+        return 0
+        #do nothing for future use
+    ;;
+    lx05|l07a)
+        wireless_log "waiting for signal check lx05"
+        wifi_signal_check_rtl $WHICH_SSID
+        return $?
+    ;;
+    *)
+        wifi_signal_check_wl $WHICH_SSID
+        return $?
+    ;;
+    esac
+
+    return 0;
+}
+
+#################################################################################################
+player_pause()
+{
+    /usr/bin/mphelper pause 1>/dev/null 2>/dev/null
+}
+
+REGISTER_FLAG="/tmp/mico_reigister_is_working"
+unlock()
+{
+    wireless_log "#LOCK# unlock `cat $REGISTER_FLAG`"
+    rm -f $REGISTER_FLAG
+    sync
+}
+
+trylock()
+{
+    [ -f $REGISTER_FLAG ] && {
+        wireless_log "#LOCK# already locked by $(cat $REGISTER_FLAG)."
+        return 1;
+    }
+
+    echo "$1" > $REGISTER_FLAG
+    sync
+    wireless_log "#LOCK# $1 lock success."
+    return 0;
+}
+
+#if locked by $WHICH_LOCK, wait
+#if not locked by $WHICH_LOCK, fail
+#if not locked, trylock, success
+#if timeout, fail.
+trylock_wait()
+{
+    TIMEOUT=$3
+    WHICH_LOCK=$1
+    MY_LOCK=$2
+    wireless_log "#LOCK#  wait lock $WHICH_LOCK, timeout $TIMEOUT"
+    local wait_times=0
+    while true;
+    do
+        [ $((${wait_times})) -ge $TIMEOUT ] && { 
+            wireless_log "#LOCK# wait lock $WHICH_LOCK timeout. fail."
+            return 1
+        };
+        
+
+        [ ! -f $REGISTER_FLAG ] && {
+            echo "$MY_LOCK" > $REGISTER_FLAG
+            sync
+            wireless_log "#LOCK# $MY_LOCK lock success."
+            return 0;
+        }
+
+        CURRENT_LOCK=$(cat $REGISTER_FLAG)
+        [ "$CURRENT_LOCK" != "$WHICH_LOCK" ] && { 
+            wireless_log "#LOCK# current locked by $CURRENT_LOCK, not by lock $WHICH_LOCK, fail."
+            return 1;
+        };
+        wireless_log "#LOCK# wait lock $WHICH_LOCK, $wait_times times"
+        wait_times=$((${wait_times}+1));
+        sleep 1;
+    done
+
+    return 1    
+}
+
+hostapd_start()
+{
+    wireless_log "host apd start."
+    HOSTAPD_CONFIG="/tmp/hostapd.conf"
+    ap_model_get
+   
+    sn=$(getmac.sh sn)
+    sn_poststr=${sn:$((${#sn}-4))}
+    ssid=xiaomi-wifispeaker-${AP_MODEL}_miap${sn_poststr:-0001}
+
+    #random chanel
+    channel=$(($(date +%s)%11+1))
+    wireless_log "ap mode channel=$channel $newssid ssid:$ssid"
+
+#format see /etc/wifi/hostapd.conf 
+echo "ssid=${ssid}
+channel=${channel}
+interface=wlan0
+driver=nl80211
+wpa=0
+rsn_pairwise=CCMP" > $HOSTAPD_CONFIG
+    sync
+
+    [ "$ROM_TYPE" == "s12c_marvell" || "$ROM_TYPE" == "lx06" || "$ROM_TYPE" == "l06a" ] && {
+echo "
+hw_mode=g
+ieee80211n=1
+ht_capab=[SHORT-GI-20]" >> $HOSTAPD_CONFIG
+    }
+
+    hostapd -d -P /tmp/hostapd.pid $HOSTAPD_CONFIG >/tmp/hostapd.log &
+}
+
+#配网成功后脚本会自己退出
+aptimer_start() {
+    #for ccmp error
+    [ -f $WIRELESS_CONF ] && {
+        wireless_log "ap timer will not start."
+        return 0
+    }
+
+    [  -f "/data/status/config_done" ] && {
+        wireless_log "ap timer will not start."
+        return 0
+    }
+
+    wireless_log "ap timer start."
+    killall -9 ap_timer.sh >/dev/null 2>&1
+    /usr/bin/ap_timer.sh & >/dev/null 2>&1
+}
+
+
+wait_dhcp_done()
+{
+    local wpa_result="/tmp/wpa_supplicant_auth_result"
+    local wait_times=0
+    echo "waiting dhcp done $wait_times"
+    while true;
+    do
+        [ -f "$wpa_result" ] && {
+            dhcp_done=0;
+            break            
+        }
+
+        [ -f "/data/status/dhcp_done" ] && {
+            dhcp_done=1;
+            break;
+        }
+
+        [ $((${wait_times})) -ge $1 ] && { 
+            dhcp_done=0;
+            break
+        };
+        
+        wireless_log "waiting dhcp done $wait_times"
+        echo "waiting dhcp done $wait_times"
+        wait_times=$((${wait_times}+1));
+        sleep 1;
+    done
+}
+
+conf_delete()
+{
+    rm -f $WIRELESS_CONF 1>/dev/null 2>/dev/null
+    sync
+}
+
+conf_create()
+{
+    local _ssid=$2
+    local _password=$3
+    local _identity=$4
+    local countryconf=""
+    local wireless_conf=$1
+    local _country=$(uci -c /data/etc get binfo.binfo.country)
+    _country=${_country:-CN}
+
+    mkdir -p /data/wifi/
+
+    wireless_log "Create wifi config file: $_config_file"
+    [ "${wireless_conf}" == "" ] && wireless_conf=$WIRELESS_CONF
+
+    [ "$ROM_TYPE" == "s12c_marvell" || "$ROM_TYPE" == "lx06" || "$ROM_TYPE" == "l06a" ] && {
+        countryconf="country=$_country"
+    }
+
+    #MIBT_CONFIG_WIFI_WPAEAP
+    [ "$_identity" != "" -a "$_password" != "" ] && {
+echo -e "ctrl_interface=/var/run/wpa_supplicant
+ap_scan=1
+$countryconf
+
+network={
+  ssid=\"$_ssid\"
+  scan_ssid=1
+  key_mgmt=WPA-EAP IEEE8021X
+  eap=PEAP
+  identity=\"$_identity\"
+  password=\"$_password\"
+  phase2=\"\"
+}" > ${wireless_conf}
+    sync
+    return;
+}
+
+#MIBT_CONFIG_WIFI_WPA
+[ "$_password" != "" ] && {
+    [ ${#_password} -eq 64 ] && {
+#len == 64 means HEX
+echo -e "ctrl_interface=/var/run/wpa_supplicant
+ap_scan=1
+$countryconf
+
+network={
+  ssid=\"$_ssid\"
+  psk=$_password
+  scan_ssid=1
+  key_mgmt=WPA-PSK
+}\n" > ${wireless_conf}
+    sync
+    return;
+    }
+
+echo -e "ctrl_interface=/var/run/wpa_supplicant
+ap_scan=1
+$countryconf
+
+network={
+  ssid=\"$_ssid\"
+  psk=\"$_password\"
+  scan_ssid=1
+  key_mgmt=WPA-PSK
+}\n" > ${wireless_conf}
+    sync
+    return;
+}
+
+#MIBT_CONFIG_WIFI_OPEN
+echo -e "ctrl_interface=/var/run/wpa_supplicant
+ap_scan=1
+$countryconf
+
+network={
+  ssid=\"$_ssid\"
+  scan_ssid=1
+  key_mgmt=NONE
+}\n" > ${wireless_conf}
+    sync
+    return;
+}
+
+app_restart_check()
+{
+    /etc/init.d/messagingagent restart >/dev/null 2>&1
+    /etc/init.d/mediaplayer restart >/dev/null 2>&1
+    /etc/init.d/alarm restart >/dev/null 2>&1
+    /etc/init.d/pns restart >/dev/null 2>&1
+    sleep 1
+}
+
+country_change_check()
+{
+    [ ! -f "/data/status/config_done" ] && {
+        wireless_log "conifg not done, will not check country"
+        return 0
+    }
+ 
+    local _ccode=$1
+    local _old=$(uci -c /data/etc get binfo.binfo.country)
+    _ccode=$(echo $_ccode|tr '[a-z]' '[A-Z]')
+    _old=$(echo $_old|tr '[a-z]' '[A-Z]')
+    _ccode=${_ccode:-CN}
+    _ccode=${_ccode//NULL/CN}
+    _old=${_old:-CN}
+
+    wireless_log "country old $_old new $_ccode"
+    [ "$_ccode" != "$_old" ] && {
+        wireless_log "config mode country changed, not allow"
+        return 1
+    }
+    
+    return 0
+}
+
+register_user_write()
+{
+    wireless_log "write register time and uid."
+    echo $(date +"%Y-%m-%d %H:%M:%S") >/data/status/register_date
+    echo "$1" >/data/status/register_user
+
+    fsync /data/status/register_date
+    fsync /data/status/register_user
+}
+
+register_info_write()
+{
+    wireless_log "write register country ssid"
+    echo CCODE:$1 >/data/status/register_info
+    echo SSID:$2 >>/data/status/register_info
+    echo PASSWORD:$3 >>/data/status/register_info
+    echo IDENTIFY:$4 >>/data/status/register_info
+    fsync /data/status/register_info
+}
+
+register_type_write()
+{
+    echo $1 >/data/status/register_type
+    fsync /data/status/register_type
+}
+
+country_code_delete()
+{
+    [ -f "/data/status/config_done" ] && {
+        wireless_log "conifg already done, will not clean country"
+        return 0
+    }
+
+    uci -c /data/etc/ delete binfo.binfo.country  1>/dev/null 2>/dev/null
+    uci -c /data/etc/ commit  1>/dev/null 2>/dev/null
+}
+
+country_code_update()
+{
+    local _ccode=$1
+    local _regrev
+    local _config_file="/data/wifi/config.txt"
+    local _old=$(uci -c /data/etc get binfo.binfo.country)
+    _ccode=$(echo $_ccode|tr '[a-z]' '[A-Z]')
+    _old=$(echo $_old|tr '[a-z]' '[A-Z]')
+    _ccode=${_ccode:-CN}
+    _ccode=${_ccode//NULL/CN}
+    _old=${_old:-CN}
+
+    wireless_log "Update wifi config file: $_config_file"
+
+    _ccode_write=$_ccode
+    if [ "$_ccode" == "CN" ]; then
+        _regrev=38
+    elif [ "$_ccode" == "TW" ]; then
+        _regrev=0
+        [ "$ROM_TYPE" == "s12a" ] && {
+             _regrev=38
+            _ccode_write="CN"
+        }
+
+        [ "$ROM_TYPE" == "s12c_marvell" || "$ROM_TYPE" == "lx06" || "$ROM_TYPE" == "l06a" ] && {
+            _ccode_write="TW/2"
+        }
+    else
+        wireless_log "The country code is invalid"
+        return
+    fi
+
+    wireless_log "The country code $_ccode write $_ccode_write"
+    uci -c /data/etc/ set binfo.binfo.country=$_ccode
+    uci -c /data/etc/ commit
+
+    /bin/config_update.sh $_config_file ccode=$_ccode_write  1>/dev/null 2>/dev/null
+    /bin/config_update.sh $_config_file regrev=$_regrev  1>/dev/null 2>/dev/null
+
+    sync
+    [ "$_ccode" != "$_old" ] && {
+        wireless_log "country code $_ccode old $_old, restart app and firmware."
+        app_restart_check
+        firmware_reset
+    }
+}
+
+config_start_sound()
+{
+    miplayer -f /usr/share/sound/init_wifi_config.mp3 >/dev/null 2>/dev/null &
+}
+
+internet_check()
+{
+    [ $HTPDATE_SYNC -eq 1 ] && {
+        wireless_log "checking internet, time sync...."
+        htpdate -d -l -t -s www.mi.com
+    }
+    wireless_log "checking internet...."
+    
+    local check_url="https://api2.mina.mi.com/ping"
+    [ "$country" == "TW" ] && {
+        check_url="https://tw.api2.mina.mi.com/ping"
+    }
+
+    SLEEP_TIME=8
+    MAX_TIME=25
+    MAX_WAIT_TIMES=8
+    time_start=$(date +%s)
+    time_expire=$((time_start + MAX_TIME))
+    local wait_times=0
+
+    wireless_log "start:$time_start expire:$time_expire waittimes $wait_times url $check_url"
+    sleep 1
+    while true;            
+    do
+        connect_result=$(curl --connect-timeout 3 $check_url)
+        [ "$connect_result" == "good" ] && {
+            wireless_log "checking internet curl return \"$connect_result\", return"
+            network_ready=1;
+            return 0;
+        }
+
+        wireless_log "checking internet curl return \"$connect_result\", retry"
+        time_now=$(date +%s)
+        [ $time_now -gt $time_expire -a $wait_times -gt $MAX_WAIT_TIMES ] && {
+            wireless_log "checking internet expire \"$connect_result\", exit"
+            network_ready=0;
+            return
+        }
+
+        wireless_log "waiting internet check done $wait_times"
+        echo "waiting internet check done $wait_times"
+        wait_times=$((${wait_times}+1));
+     
+        sleep 1;
+    done
+
+    echo "fail"
+    return 1;
+}
+
+
+scan_stop()
+{
+    [ "$ROM_TYPE" != "s12c_marvell" ] && {
+        wl scanabort
+    }
+}
+
+SCAN_LOCK="scan"
+scan()
+{
+    SCAN_LOG="/tmp/wireless_scan.log"
+    WHICH_SSID=$1
+
+    trylock $SCAN_LOCK
+    [ $? != 0 ] && {
+        wireless_log "already proessing a regiser issue, stop scan"
+        exit 2;
+    }
+    case $ROM_TYPE in
+    s12|s12a|lx01|lx05a)
+        wl scan --ssid=$WHICH_SSID
+        sleep 3
+        wl scanresults > $SCAN_LOG
+        wl scanabort
+        cat $SCAN_LOG |grep "^SSID:"|grep "\"$WHICH_SSID\""
+        local scan_results=$(cat $SCAN_LOG |grep "^SSID:"|grep "\"$WHICH_SSID\""|wc -l)
+        #CURRENT_BSSID=$(cat $SCAN_LOG |grep BSSID|awk '{print $2}')
+    ;;
+    s12c_marvell|lx06|l06a)
+        #mlanutl wlan0 setuserscan ssid=$WHICH_SSID >$SCAN_LOG
+        #local scan_results=$(cat $SCAN_LOG |grep "\"$WHICH_SSID\""|wc -l)
+    ;;
+    lx05|l07a) 
+        echo "do nothing for $ROM_TYPE"
+    ;;
+    esac
+
+    #mico_log "waiting for scan done $wait_times"
+    [ $scan_results -eq 1 ] && {
+        cp $SCAN_LOG $SCAN_LOG.backup
+        unlock
+        exit 1;
+    }
+    unlock
+    exit 0; 
+}
+
+wireless_stop()
+{
+    /etc/init.d/dnsmasq stop >/dev/null 2>&1
+    /etc/init.d/dhcpc stop >/dev/null 2>&1
+    /etc/init.d/odhcp6c stop >/dev/null 2>&1
+    case $ROM_TYPE in
+    s12|s12a|lx01|lx05a)
+        wl disassoc
+    ;;
+    esac
+
+    killall -9 wireless_point.sh >/dev/null 2>&1
+    killall -9 miio_service >/dev/null 2>&1
+    killall -9 wifi_check_ccmp.sh >/dev/null 2>&1
+    killall -9 hostapd >/dev/null 2>&1
+    . /lib/functions/procd.sh
+
+    #urgly fix for destroy useless socket files
+    rm -f /tmp/wpa_ctrl_*
+    procd_kill "wireless"
+    #for ccmp error
+    ifconfig wlan0 down
+    
+    firmware_stop
+}
+
+ap_start()
+{
+    show_led 6
+    wireless_log "miio enter ap config mode"
+    ubus call mibt ble '{"action":"display"}'
+    file_create "/tmp/ap_config_mode_flag"
+    if [ ! -f "/data/status/config_done" ] 
+    then 
+        wireless_log "set ap config mode start"
+        firmware_prepare_ap
+        
+        ifconfig wlan0 up
+        sleep 2s
+        ifconfig wlan0 10.0.0.1
+
+        case $ROM_TYPE in
+        s12|s12a|lx01|lx05a)
+            bssid=`matool_get_mac`
+            wl down
+            wl cur_etheraddr  $bssid
+            wl up
+        ;;
+        esac
+
+        hostapd_start
+
+        /etc/init.d/miio restart
+        /etc/init.d/dnsmasq restart
+        wireless_log "set ap config mode finish"
+        ifconfig wlan0 10.0.0.1
+    else
+        data_prepare
+    fi
+
+}
+
+sta_start()
+{
+    local wireless_conf=$1
+
+    [ "${wireless_conf}" == "" ] && wireless_conf=$WIRELESS_CONF
+    firmware_prepare_sta
+    ifconfig wlan0 up
+    # A workaround to improve network performance under low SNR wifi link on LX01
+    case "$ROM_TYPE" in LX01|lx01*) ifconfig wlan0 mtu 900;; esac
+    #/usr/sbin/wpa_supplicant  -Dnl80211 -iwlan0 -c${wireless_conf} & >/dev/null 2>&1
+    #/usr/sbin/wpa_cli -a/bin/wpa_action.sh & >/dev/null 2>&1
+    scan_stop
+    . /lib/functions/procd.sh
+
+    procd_kill "wireless"
+    procd_open_service "wireless"
+    procd_open_instance
+    procd_set_param command /usr/sbin/wpa_supplicant -Dnl80211 -iwlan0 -c${wireless_conf} -s
+    #procd_set_param command /usr/sbin/wpa_supplicant -Dnl80211 -iwlan0 -c${wireless_conf} -s -dd
+    procd_set_param respawn 3600 5 0
+    procd_close_instance  
+
+    procd_open_instance
+    procd_set_param command /usr/sbin/wpa_cli -a/bin/wpa_action.sh
+    procd_set_param respawn 3600 5 0
+    procd_close_instance 
+    procd_close_service
+
+    case $ROM_TYPE in
+    s12|s12a|lx01|lx05a)
+        /bin/wifi_check_ccmp.sh &
+    ;;
+    esac
+    
+    wireless_log "wpa config file:${wireless_conf}"
+    /etc/init.d/dhcpc restart >/dev/null 2>&1
+    /etc/init.d/odhcp6c restart >/dev/null 2>&1
+}
+
+config_clean()
+{
+    shut_led 10
+    show_led 6
+    wireless_stop > /dev/null 2>&1;
+    conf_delete > /dev/null 2>&1;
+    country_code_delete
+    rm -rf $ANDLINK_DIR
+    miplay /usr/share/sound/setup_failure.opus & 
+    ap_start >/dev/null 2>&1
+}
+
+user_data_clean()
+{
+    rm /data/alarm -r -f > /dev/null 2>&1;
+    rm /data/timer -r -f > /dev/null 2>&1;
+    # rm /data/status -r -f > /dev/null 2>&1;
+    rm /data/messagingagent -r -f > /dev/null 2>&1;
+    rm /data/.mediaplayerconfig -r -f> /dev/null 2>&1;
+    rm /data/miio -r -f > /dev/null 2>&1;
+    rm /data/mibrain/mibrain_asr_nlp.rcd > /dev/null 2>&1;
+    rm /data/bt/bt_devices.xml > /dev/null 2>&1;
+    rm /data/bt/bt_av_devices.xml > /dev/null 2>&1;
+    rm /data/upnp-disc -r -f > /dev/null 2>&1;
+    rm /data/dts_conf -r -f > /dev/null 2>&1;
+    rm /data/voip -r -f > /dev/null 2>&1;
+    rm /data/player/volume.cfg
+    sync
+    /etc/init.d/alarm restart;
+    /etc/init.d/voip restart;
+    /etc/init.d/mediaplayer restart;
+    /etc/init.d/messagingagent restart;
+    /etc/init.d/miio restart;
+    /etc/init.d/pns restart
+    /etc/init.d/mibrain_service restart
+    /etc/init.d/sound_effect restart
+}
+
+wifi()
+{
+    show_led 10
+    wireless_log "try connect wifi ssid:$2 password:$3 identity:$4 timeout:$1"
+    wireless_stop  >/dev/null 2>&1
+
+    SSID=$(echo "$2" |sed s#'\\'#'\\\\'#g)
+    PASSWORD=$(echo "$3" |sed s#'\\'#'\\\\'#g)
+
+    conf_create /tmp/wpa_supplicant.conf "$SSID" "$PASSWORD" "$4" >/dev/null 2>&1
+
+    sta_start /tmp/wpa_supplicant.conf >/dev/null 2>&1
+
+    show_led 10
+
+    wireless_log "waiting for dhcp done"
+    wait_dhcp_done "$1" >/dev/null 2>&1
+    [ "$dhcp_done" == "0" ] && {
+        wireless_log "wifi connect fail."
+        config_clean 
+        echo "dhcpfail"
+        return 1
+    };
+
+    #export LED_PARENT=$0;
+    #/bin/shut_led 10 1>/dev/null 2>/dev/null
+    echo "success"
+    return 0;
+}
+
+internet()
+{
+    wpa_result="/tmp/wpa_supplicant_auth_result"
+    wireless_stop 1>/dev/null 2>/dev/null
+    wireless_log "try connect internet ssid:$2 password:$3 identity:$4 timeout:$1"
+
+    SSID=$(echo "$2" |sed s#'\\'#'\\\\'#g)
+    PASSWORD=$(echo "$3" |sed s#'\\'#'\\\\'#g)
+
+    conf_create $WIRELESS_CONF "$SSID" "$PASSWORD" "$4" >/dev/null 2>&1
+
+    file_delete $wpa_result >/dev/null 2>&1
+    sta_start $WIRELESS_CONF >/dev/null 2>&1
+
+    wireless_log "waiting for dhcp done"
+
+    wait_dhcp_done "$1" 1>/dev/null 2>/dev/null
+    [ "$dhcp_done" == "0" ] && {
+         wireless_log "wifi connect fail."
+
+
+         [ -f "$wpa_result" ] && {
+             [ $(cat $wpa_result) == "key_mgmt_mismatch" ] && {
+                echo "key_mgmt_mismatch"
+             } || {
+                echo "authfail"
+             }
+
+             config_clean
+             file_delete $wpa_result >/dev/null 2>&1
+             return 5;
+         }
+
+         config_clean
+         wifi_signal_check $SSID
+         local check_result=$?
+         wireless_log "wifi connect fail signal check result $check_result."
+         [ $check_result -eq 2 ] && {
+             #ssidnotfound -->
+             echo "ssidnotfound"
+             return 4;
+         }
+
+         [ $check_result -eq 1 ] && {
+             echo "signalweak"
+             return 3;
+         }
+
+         echo "dhcpfail"
+         return 1
+    };
+    wireless_log "waiting for dhcp done fininsh"
+
+    internet_check 1>/dev/null 2>/dev/null
+    [ "$network_ready" -eq "0" ] && {
+        config_clean
+        echo "networkfail"
+        return 2;
+    }
+
+    echo "success"
+    return 0;
+}
+
+#################################### BOOT DONE #####################################################
+# -->/etc/init.d/done
+boot_start()
+{
+    MEDIA_CONF_FILE="/data/player/volume.cfg"
+    if [ -f $MEDIA_CONF_FILE ]; then
+        config_volume=$(grep "volume" $MEDIA_CONF_FILE | cut -f2 -d'"')
+        wireless_log "config_volume:"$config_volume
+        if [ -n "$config_volume" ] && [ "$config_volume" -ge "0" ] && [ "$config_volume" -le "255" ]; then
+            VOL_VALUE=$config_volume
+        else
+            wireless_log "wrong config_volume:"$config_volume
+        fi
+    fi
+
+    wireless_log "boot start volume $VOL_VALUE"
+    amixer sset mysoftvol $VOL_VALUE
+    [ -x /bin/silentboot.sh ] && si_flag=`/bin/silentboot.sh get`
+    if [ "$si_flag" = "1" ]; then
+        wireless_log "Silent boot mode... skip bootup start sound."
+    else
+        miplay /usr/share/sound/bootup.mp3 &
+    fi
+}
+
+boot_done()
+{
+    MEDIA_CONF_FILE="/data/player/volume.cfg"
+    if [ -f $MEDIA_CONF_FILE ]; then
+        config_volume=$(grep "volume" $MEDIA_CONF_FILE | cut -f2 -d'"')
+        wireless_log "config_volume:"$config_volume
+        if [ -n "$config_volume" ] && [ "$config_volume" -ge "0" ] && [ "$config_volume" -le "255" ]; then
+            VOL_VALUE=$config_volume
+        else
+            wireless_log "wrong config_volume:"$config_volume
+        fi
+    fi
+
+    wireless_log "boot done volume $VOL_VALUE"
+    amixer sset mysoftvol $VOL_VALUE
+    if [ ! -f "/data/status/config_done" ]; then
+        ubus -t 10 wait_for mediaplayer
+        /etc/init.d/pns stop
+    
+        mphelper tone /usr/share/sound/welcome.opus
+        /etc/init.d/pns start   
+    else
+        [ -x /bin/silentboot.sh ] && si_flag=`/bin/silentboot.sh get`
+        if [ "$si_flag" = "1" ]; then
+            wireless_log "Silent boot mode... skip bootup done sound."
+        else
+            miplay /usr/share/sound/bootup.mp3 &
+        fi
+    fi
+
+    aptimer_start
+}
+
+#################################### POST MIIO ISSUE ##############################################
+# -->config_mode ->touchpad
+config_mode()
+{
+    #force unlock
+    [ ! -f "/data/status/config_done" ] && {
+        wireless_log "not config done, dismiss config mode."
+        wireless_log " config mode　will not exit for temp"
+        #exit 1
+    }
+
+    unlock
+    
+    wireless_log "config mode volume $VOL_VALUE."
+    wireless_log "config mode remove config file."
+    rm -f /data/status/mico_try_register_times
+    conf_delete
+    sync
+    file2log $WIRELESS_CONF
+    #equipment binding information exists,
+    #disconnect wireless to ensure that the device is in a stop service state
+    player_pause
+    show_led 6
+    amixer sset mysoftvol $VOL_VALUE
+    
+    sleep 1
+
+    case $ROM_TYPE in
+    l07a)
+    	ubus -t 1 call qplayer play {\"play\":\"/usr/share/sound/enter_config_mode_l07a.opus\"}
+    	break;
+    ;;
+    *)
+    	miplay /usr/share/sound/enter_config_mode.wav
+    	break;
+    ;;
+    esac
+
+    wireless_log "config mode try restart miio."
+    [ -f $WIRELESS_CONF ] && {
+        mv $WIRELESS_CONF /tmp/wpa_supplicant.conf.useless
+        wireless_log "config mode wait 3 seconds, retry delete conf."
+    }
+    /etc/init.d/mibt_mesh_proxy stop
+    /etc/init.d/bluetooth restart
+    /etc/init.d/mibt_mesh_proxy restart
+    /etc/init.d/wireless restart
+    /etc/init.d/voip restart
+
+    file2log $WIRELESS_CONF
+    wireless_log "config mode restart miio."
+    /etc/init.d/miio restart
+    #ubus call mibt enable '{"btmode":"ble", "action":"close"}'
+}
+
+andlink_enable()
+{
+     custom_type=$(uci  -c /data/etc/ get binfo.binfo.custom)
+     wireless_log "test andlink enable, type $custom_type"
+     [ x"$custom_type" == x"CMCC" ]  && {
+         wireless_log "try andlink enabled"
+         /etc/init.d/cmcc_andlink enable >/dev/null 2>&1
+     }
+}
+
+#################################### POST MIIO ISSUE ##############################################
+# -->miio_client_helper
+post_miio()
+{
+    wireless_log "miio exit ap config mode"
+    file_delete "/tmp/ap_config_mode_flag"
+    file_create /data/status/config_done
+    /etc/init.d/dnsmasq restart
+    ubus call mibt enable '{"btmode":"ble", "action":"close"}'
+    ubus call mibt enable '{"btmode":"classic", "action":"close"}'
+    /bin/shut_led 10
+
+    andlink_enable >/dev/null 2>&1
+    /etc/init.d/cmcc_ims restart  >/dev/null 2>&1
+    nice -n -10 miplayer -f /usr/share/sound/network_done_miio.mp3 &
+}
+
+
+
+#################################### MIIO #########################################################
+# -->miio_client_helper
+miio_register()
+{
+    uid=$1
+    country=$2
+    ssid=$3
+    password=$4
+    identity=$5
+
+    config_start_sound
+    show_led 10
+    #trylock "miio"
+
+    trylock_wait $SCAN_LOCK "miio" 10
+    [ $? != 0 ] && {
+        shut_led 10
+        wireless_log "already proessing a regiser issue, stop miio"
+        echo "already_in_register"
+        exit 1;
+    }
+
+
+    #remove for cmcc-ims
+    #connect_times_update 
+    player_pause
+    country_code_update $country
+    internet 16 "$ssid" "$password"
+    [ "$?" != "0" ] && {        
+        wireless_log "dhcp faild!"
+        unlock
+        exit 1;
+    }
+
+    unlock
+
+    register_user_write "$uid"  1>/dev/null 2>/dev/null
+    register_info_write "$country" "$ssid" "$password" "$identity"  1>/dev/null 2>/dev/null
+    register_type_write miio  1>/dev/null 2>/dev/null
+    exit 0;
+}
+
+miio_stop()
+{
+    /etc/init.d/miio stop
+}
+
+miio_start()
+{
+    file_delete /data/miio/miio_sessionid
+    file_delete /data/miio/miio_token
+    /etc/init.d/miio restart 1>/dev/null 2>/dev/null
+}
+
+#################################### ANLINK REGISTER #########################################################
+andlink_success()
+{
+    mkdir -p /data/status;  
+    register_type_write andlink
+    file_create /data/status/config_done
+    file_delete "/tmp/ap_config_mode_flag"
+    /etc/init.d/dnsmasq restart  1
+    miio_start
+    andlink_enable >/dev/null 2>&1
+    /etc/init.d/cmcc_ims stop  >/dev/null 2>&1
+    miplay /usr/share/sound/network_done_miio.mp3
+    /etc/init.d/cmcc_ims start  >/dev/null 2>&1
+    sync
+}
+
+andlink_env_prepare()
+{
+    DEVICE_TYPE=$(uci get cmcc.andlink.device_type)
+    PRODUCT_TOKEN=$(uci get cmcc.andlink.product_token)
+    ANDLINK_TOKEN=$(uci get cmcc.andlink.andlink_token)
+    wireless_log "DEVICE_TYPE:$DEVICE_TYPE"
+    wireless_log "PRODUCT_TOKEN:$PRODUCT_TOKEN"
+    wireless_log "ANDLINK_TOKEN:$ANDLINK_TOKEN"
+
+    QLINK_BROADCAST_IP=$(ifconfig wlan0 |grep "Bcast:" |awk '{print $3}'|awk -F':' '{print $2}')
+    mico_log "QLINK_BROADCAST_IP:$QLINK_BROADCAST_IP"
+}
+
+andlink_coap_online()
+{
+    andlink_env_prepare
+    local DEVICE_MAC=$(matool_get_mac)
+    wireless_log "andlink coap broadcast online"
+
+    coap-client -B 10 -N -m post -e '{"deviceMac":"'$DEVICE_MAC'","deviceType":"'$DEVICE_TYPE'"}' coap://$QLINK_BROADCAST_IP:5683/qlink/success &
+    wireless_log  "coap-client -B 10 -N -m post -e '{\"deviceMac\":\"'$DEVICE_MAC'\",\"deviceType\":\"'$DEVICE_TYPE'\"}' coap://$QLINK_BROADCAST_IP:5683/qlink/success"
+}
+
+
+# --> mibt_ble
+#{
+#    "SSID":"shaohuihua",
+#    "password":"12345678",
+#    "channel":"0",
+#    "encrypt":"",
+#    "CGW":{
+#        "gwAddress":"112.13.96.199:5683",
+#        "gwAddress2":"https://112.13.96.199:20443",
+#        "user_key":"TYuYNdvxcZjILBe9xTwTsYmrPhCN0bD8FevrJ-QEXMaT2SFHCkHakyyvhfxkganu"
+#    }
+#    "extra":{
+#        "method":"****" // 参见表格"method值"
+#        "data":"****"// data值使用JSON格式，具体内容由设备端与APP端协商，不在本规范中体现
+#    }
+#} 
+andlink_register()
+{
+
+    rm -rf $ANDLINK_DIR
+    mkdir -p $ANDLINK_DIR; 
+    local conf_file=$1
+    local country=
+    local uid=
+    local ssid=
+    local password=
+    local encrypt=
+    local CGW=
+    local gwAddress2=
+    local user_key=
+    local method=
+    local data=
+    local country=cn
+    local oauth_token=""
+    local oauth_uid=""
+    local oauth_appid=""
+
+    config_start_sound
+    show_led 10
+
+    json_init 1>/dev/null 2>/dev/null
+    json_load "$(cat $conf_file)"  1>/dev/null 2>/dev/null
+    json_get_var ssid "SSID" 1>/dev/null 2>/dev/null
+    json_get_var password "password" 1>/dev/null 2>/dev/null
+    json_get_var encrypt "encrypt" 1>/dev/null 2>/dev/null
+    json_select  extra 1>/dev/null 2>/dev/null
+    json_get_var oauth_token "miotoken" 1>/dev/null 2>/dev/null
+    json_get_var oauth_appid "miAppid" 1>/dev/null 2>/dev/null
+    json_get_var oauth_uid "userId" 1>/dev/null 2>/dev/null
+    json_select  .. 1>/dev/null 2>/dev/null
+    json_select  CGW 1>/dev/null 2>/dev/null
+    json_get_var gwAddress2 "gwAddress2" 1>/dev/null 2>/dev/null
+    json_get_var user_key "user_key" 1>/dev/null 2>/dev/null
+    json_select  .. 1>/dev/null 2>/dev/null
+    json_cleanup
+
+    wireless_log "andlink connect start."
+    wireless_log "ssid $ssid"
+    wireless_log "password $password"
+    #OPEN WEP, WPAPSK, WPAPSK2, MIXED-WPAPSK2
+    wireless_log "encrypt $encrypt"
+    wireless_log "gwAddress2 $gwAddress2"
+    wireless_log "user_key $user_key"
+    wireless_log "miotoken $oauth_token"
+    wireless_log "miAppid $oauth_appid"
+    wireless_log "userId $oauth_uid"
+    wireless_log "method $method"
+    wireless_log "data $data"
+
+    [ "$ssid" == "" -o "$gwAddress2" == "" -o "$user_key" == "" -o "$oauth_token" == "" -o "$oauth_appid" == "" -o "$oauth_uid" == "" ] && {
+        unlock
+        wireless_log "lackof arg"
+        echo "lackof arg"
+        shut_led 10
+        unlock
+        config_clean
+        miio_start
+        rm $conf_file  1>/dev/null 2>/dev/null
+        exit 5
+    }
+
+
+
+    echo $gwAddress2 >$ANDLINK_DIR/gwAddress2
+    echo $user_key >$ANDLINK_DIR/user_key
+    echo $method >$ANDLINK_DIR/method
+    echo $data >$ANDLINK_DIR/data
+
+    #trylock "ble"
+    trylock_wait $SCAN_LOCK "andlink" 10
+    [ $? != 0 ] && {
+        wireless_log "already proessing a regiser issue, stop ble."
+        shut_led 10
+        config_clean
+        miio_start
+        rm $conf_file  1>/dev/null 2>/dev/null
+        echo "already_in_register"
+        exit 1;
+    }
+
+    connect_times_update
+    player_pause
+
+    register_user_write "$uid"  1>/dev/null 2>/dev/null
+    register_info_write "$country" "$ssid" "$password" "$identity"  1>/dev/null 2>/dev/null
+    country_code_update $country 1>/dev/null 2>/dev/null 
+    
+    miio_stop
+    connect_result=$(internet 16 "$ssid" "$password" "$identity");
+    [ "$connect_result" != "success" ] && {
+        wireless_log "wifi connnect fail ret $connect_result"
+        shut_led 10
+        unlock
+        config_clean
+        miio_start
+        rm $conf_file  1>/dev/null 2>/dev/null
+        echo "$connect_result"
+        exit 2;
+    }
+
+    andlink_coap_online 1>/dev/null 2>/dev/null 
+    sleep 3
+
+    wireless_log "TRY GET UID"
+    local new_uid=$(matool_get_uid_by_oauth $oauth_appid $oauth_token)
+    [ -z $new_uid ] && {
+        wireless_log "result new uid $new_uid"
+        rm $conf_file  1>/dev/null 2>/dev/null
+        echo "oauth_not_get_uid"
+        shut_led 10
+        unlock
+        config_clean
+        miio_start
+        exit 4;
+    }
+
+    wireless_log "TRY BIND"
+    local bind_result=$(matool_identify_and_bind_device $new_uid)
+    [ "$bind_result" != "success" ] && {
+        wireless_log "uid bind result:"
+        wireless_log "$connect_result"
+        wireless_log "uid bind result end"
+        rm $conf_file  1>/dev/null 2>/dev/null
+        echo "oauth not get uid"
+        shut_led 10
+        unlock
+        config_clean
+        miio_start
+        exit 4;
+    }
+
+
+    shut_led 10
+    miio_start
+    unlock
+    rm $conf_file  1>/dev/null 2>/dev/null
+    wireless_log "andlink register success."
+    andlink_success 1>/dev/null 2>/dev/null &
+    echo "success"
+
+    exit 0
+}
+
+
+#################################### POST BLE ISSUE ###############################################
+# -->mibt_ble 
+post_ble()
+{
+    device_count=$1
+    wireless_log "a bind sound count $device_count"
+    wireless_log "ble exit ap config mode"
+
+    mphelper tone /usr/share/sound/init_wifi_success.mp3 &
+
+    andlink_enable >/dev/null 2>&1
+    /etc/init.d/cmcc_ims restart  >/dev/null 2>&1
+}
+
+#################################### BLE ##########################################################
+#/tmp/ble_connect_times is used in simple_dhcp.sh
+connect_times_update()
+{
+    mkdir -p /data/status/
+    local connect_times=0;
+    local CONNECT_TIMES_FILE="/data/status/mico_try_register_times"
+    [ -f $CONNECT_TIMES_FILE ] && {
+        connect_times=$(cat $CONNECT_TIMES_FILE)
+    }
+
+    connect_times=$(($connect_times+1))
+    echo $connect_times > $CONNECT_TIMES_FILE
+    sync
+    return 0;
+}
+
+ble_success()
+{
+    mkdir -p /data/status;  
+    register_type_write ble
+    file_create /data/status/config_done
+    file_delete "/tmp/ap_config_mode_flag"
+    /etc/init.d/dnsmasq restart  1 
+    miio_start
+    /etc/init.d/voip restart
+    sync
+}
+
+ble_oauth()
+{
+    country=$1
+    uid=$2
+    ssid=$3
+    password=$4
+    identity=$5
+   
+    wireless_log "wifi connect start."
+    wireless_log "country $country"
+    wireless_log "uid $uid"
+    wireless_log "ssid $ssid"
+    wireless_log "password $password"
+    wireless_log "identity $identity"
+
+    config_start_sound
+    show_led 10
+
+    #trylock "ble"
+    trylock_wait $SCAN_LOCK "ble" 10
+    [ $? != 0 ] && {
+        wireless_log "already proessing a regiser issue, stop ble."
+        shut_led 10
+        config_clean
+        miio_start
+        echo "already_in_register"
+        exit 1;
+    }
+
+    connect_times_update
+    player_pause
+
+    register_user_write "$uid"  1>/dev/null 2>/dev/null
+    register_info_write "$country" "$ssid" "$password" "$identity"  1>/dev/null 2>/dev/null
+    country_code_update $country 1>/dev/null 2>/dev/null 
+    
+    miio_stop
+    #DEFAULT use htpdate date sync, but ble use phone time.
+    HTPDATE_SYNC=0
+    connect_result=$(internet 16 "$ssid" "$password" "$identity");
+    [ "$connect_result" != "success" ] && {
+        wireless_log "wifi connnect fail ret $connect_result"
+        shut_led 10
+        unlock
+        #config_clean
+        miio_start
+        echo "$connect_result"
+        exit 2;
+    }
+
+    wireless_log "uid try sync."
+    set_new_uid=0
+    [ "$uid" != "0" ] && {
+        wireless_log "uid sync"
+        /usr/bin/matool_get_super_admin sync > /tmp/matool_get_super_admin.log
+        [ $? -eq 0 ] && {
+            ori_uid=$(cat /tmp/matool_get_super_admin.log)
+            wireless_log "uid sync uid=$ori_uid newuid=$uid"
+            file2log "/tmp/matool_get_super_admin.log"
+            if [ "$ori_uid" == "$uid" ] 
+            then
+                #set wifi only
+                wireless_log "wifi only."
+                ble_success 1>/dev/null 2>/dev/null 
+                mphelper tone /usr/share/sound/init_wifi_success.mp3 &
+                echo "wifi_only_success"
+                shut_led 10
+
+                unlock
+                wireless_log "success"
+                exit 0
+            elif [ "$ori_uid" == "-1" -o "$ori_uid" == "" ]
+            then
+                wireless_log "uid -1, do nothing."
+                #do nothing
+            else
+                wireless_log "new uid got, clean user data."
+                user_data_clean > /dev/null 2>&1
+                sleep 4
+                set_new_uid=1;
+            fi
+        }
+        wireless_log "checking uid finish." 
+    }
+
+    sleep 3
+
+    wireless_log "TRY BIND"
+    local bind_result=$(matool_identify_and_bind_device $uid)
+    [ "$bind_result" != "success" ] && {
+        wireless_log "uid bind result:"
+        wireless_log "$bind_result"
+        wireless_log "uid bind result end"
+        echo "matoolsfail"
+        shut_led 10
+        unlock
+        config_clean
+        miio_start
+        exit 4;
+    }
+
+
+    shut_led 10 >/dev/null 2>&1
+
+    unlock
+    wireless_log "ble_oauth register success."
+    ble_success >/dev/null 2>&1
+
+    wireless_log "a bind sound count $device_count"
+    wireless_log "ble exit ap config mode"
+
+    mphelper tone /usr/share/sound/init_wifi_success.mp3  >/dev/null &
+
+    andlink_enable >/dev/null 2>&1
+    /etc/init.d/cmcc_ims restart >/dev/null 2>&1
+    device_id=$(matool_get_device_id)
+
+    echo "success:$device_id"
+
+    exit 0
+}
+
+#################################################################################################
+reset()
+{
+    firmware_reset
+}
+
+start_service() {
+    wireless_log "start"
+    #wireless_stop >/dev/null 2>&1
+    #for ccmp error
+    [ ! -f $WIRELESS_CONF ] && {
+        ap_start
+        return 0
+    }
+
+    sta_start $WIRELESS_CONF #>/dev/null 2>&1
+    /usr/bin/wireless_point.sh >/dev/null & 
+    return 0
+}
+
+stop_service() {
+    wireless_log "stop"
+    wireless_stop
+}
+
+restart() {
+    wireless_log "restart $1"
+    [ "$1" == "wificheck" ] && {
+        IS_SHOW_LED=0
+        wireless_log "wificheck restart change IS_SHOW_LED to $IS_SHOW_LED"
+    }
+    stop
+    start
+}
+
+

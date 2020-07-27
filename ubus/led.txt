@@ -1,0 +1,5 @@
+'led' @78abec6a
+	"show":{"L":"Integer","pos":"Integer","rgb":"String"}
+	"shut":{"L":"Integer"}
+	"status":{}
+	"shut_all":{}

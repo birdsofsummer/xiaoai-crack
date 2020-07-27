@@ -1,0 +1,58 @@
+#!/bin/sh /etc/rc.common
+
+START=70
+
+USE_PROCD=1
+
+
+player_log() {
+    logger -t /etc/init.d/mediaplayer[$$] -p 3 "$*"
+    echo $*
+}
+
+country_prepare()
+{
+  conf="/usr/share/mico/mediaplayer.cfg"
+  link_dir="/data/player"
+
+  mkdir -p $link_dir
+  country=$(uci -c /data/etc/ get binfo.binfo.country)
+  file_ext="."$country
+  [ ! -f  $conf$file_ext ] && {
+    player_log "file not exist, country $country"
+    file_ext=""
+  }
+
+  [ "$country" == "CN" ] && {
+    player_log "country is CN"
+    file_ext=""
+  }
+  
+  player_log "final file ext $file_ext, country $country"
+  ln -s -f $conf$file_ext $link_dir/mediaplayer.cfg
+  [ -f /data/.mediaplayerconfig/mediaplayer.cfg -a ! -f $link_dir/volume.cfg ] && {
+    cp /data/.mediaplayerconfig/mediaplayer.cfg $link_dir/volume.cfg
+  }
+
+  [ -f /data/.mediaplayerconfig/latest.cfg -a ! -f $link_dir/latest.cfg ] && {
+    cp /data/.mediaplayerconfig/latest.cfg $link_dir/latest.cfg
+  }
+
+  rm -rf /data/.mediaplayerconfig
+  sync
+}
+
+start_service() {
+  mkdir -p /data/.mediaplayerconfig
+  country_prepare
+
+  procd_open_instance
+  procd_set_param command /usr/bin/mediaplayer
+  procd_set_param respawn 3600 5 0
+  procd_close_instance
+}
+
+service_started() {
+    #renice -n-5 -p
+    true
+}

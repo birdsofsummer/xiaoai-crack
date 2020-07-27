@@ -1,0 +1,6 @@
+'network.wireless' @01c2f7ee
+	"up":{}
+	"down":{}
+	"status":{}
+	"notify":{}
+	"get_validate":{}

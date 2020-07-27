@@ -1,0 +1,25 @@
+#!/bin/sh /etc/rc.common
+START=89
+
+USE_PROCD=1
+
+update_bootloader() {
+	/usr/sbin/flash_erase /dev/mtd0 0 16
+	/bin/dd if=/lib/firmware/u-boot.bin of=/dev/bootloader bs=851968 count=1 seek=0
+}
+
+start_service() {
+	[ -f /lib/firmware/u-boot.bin ] && {
+		/bin/dd if=/dev/bootloader of=/tmp/1.bin bs=851968 count=1
+		str1=`/usr/bin/md5sum /tmp/1.bin|cut -d ' ' -f1`
+		str2=`/usr/bin/md5sum /lib/firmware/u-boot.bin|cut -d ' ' -f1`
+
+		if [ "$str1" != "$str2" ]; then
+			echo "bootloader version is old, so update bootloader ..."
+			update_bootloader
+			exit
+		else
+		        rm /tmp/1.bin
+		fi
+	}
+}

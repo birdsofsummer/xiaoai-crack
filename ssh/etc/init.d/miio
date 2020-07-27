@@ -1,0 +1,53 @@
+#!/bin/sh /etc/rc.common
+
+START=80
+USE_PROCD=1
+DEBUG=0
+
+LOG_FILE="/tmp/log/miio.log"
+LOG_FILE_FLAG="/data/status/miio_log_flag"
+LOG_TITLE=$0
+
+EXTRA_COMMANDS="enable_log disable_log"
+EXTRA_HELP="\
+        enable_log        enable miio log output to $LOG_FILE
+        disable_log       disable miio log output"
+
+mico_log() {
+    logger -t $LOG_TITLE[$$] -p 3 "$*"
+}
+
+start_service() {
+    procd_open_instance
+    if [ $DEBUG = "1" -o -f $LOG_FILE_FLAG ]; then
+	procd_set_param command /usr/bin/miio_client -L $LOG_FILE -l 3
+    else
+	procd_set_param command /usr/bin/miio_client -L /dev/null
+    fi
+    procd_set_param respawn 3600 5 0
+    procd_close_instance
+
+    procd_open_instance
+    procd_set_param command /usr/bin/miio_client_helper
+    procd_set_param respawn 3600 5 0
+    procd_close_instance
+
+    sleep 2
+
+    procd_open_instance
+    procd_set_param command /usr/bin/miio_service
+    procd_set_param respawn 3600 5 0
+    procd_close_instance
+}
+
+enable_log() {
+    mkdir -p "/data/status/"
+    echo $LOG_FILE > $LOG_FILE_FLAG
+    restart;
+}
+
+disable_log() {
+    rm $LOG_FILE_FLAG
+    rm $LOG_FILE
+    restart;
+}

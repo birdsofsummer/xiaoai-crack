@@ -1,0 +1,16 @@
+#!/bin/sh /etc/rc.common
+
+START=50
+
+if ! [ -e /data/sound ]; then
+    tts_vendor=`pns_vendor_helper tts_vendor_name_get`
+    ln -s /usr/share/sound-vendor/${tts_vendor} /data/sound
+fi
+
+KEYPATH=/sys/class/unifykeys
+echo "deviceid" > $KEYPATH/name
+sn=`cat $KEYPATH/read`
+init_pwd=`mi_console "$sn"`
+(echo $init_pwd; sleep 1; echo $init_pwd) | passwd root > /dev/null 2>&1
+sync
+

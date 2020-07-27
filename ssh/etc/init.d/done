@@ -1,0 +1,30 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006 OpenWrt.org
+
+START=95
+boot() {
+	mount_root done
+	rm -f /sysupgrade.tgz
+
+	# process user commands
+	[ -f /etc/rc.local ] && {
+		sh /etc/rc.local
+	}
+
+	#echo hotplug > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+	echo 1200000 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
+	echo disabled > /sys/class/thermal/thermal_zone0/mode
+	# set leds to normal state
+	. /etc/diag.sh
+	# disable press play key 6 seconds
+	echo 0 > /sys/devices/i2c-0/0-0008/power_control_enable
+	set_state done
+	boot_failcnt=`/bin/fw_printenv -n boot_failcnt 2>/dev/null`
+	[ "$boot_failcnt" != "0" ] && {
+            /bin/fw_setenv boot_failcnt 0
+	}
+    
+	sleep 1
+    /etc/init.d/wireless boot_done
+
+}

@@ -1,0 +1,5 @@
+'wifitool' @1ce770e0
+	"getrssi":{"get_rssi":"String"}
+	"setswitch":{"set_switch":"String"}
+	"pushrssi":{"push_rssi":"Integer"}
+	"getbssid":{"get_bssid":"String"}

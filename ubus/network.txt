@@ -1,0 +1,6 @@
+'network' @51d67f39
+	"restart":{}
+	"reload":{}
+	"add_host_route":{"target":"String","v6":"Boolean","interface":"String"}
+	"get_proto_handlers":{}
+	"add_dynamic":{"name":"String"}

@@ -1,0 +1,16 @@
+'alarm' @1dedfb7b
+	"mibrain_operation":{"mibrain":"String"}
+	"alarm_create":{"type":"String","timestamp":"Integer","circle":"Integer","volume":"Integer","event":"String","extra":"String","behavior":"String","ringtone_query":"String","ringtone_type":"String","display_txt":"String","time_reminder":"String"}
+	"alarm_query":{"type":"String"}
+	"alarm_delete":{"type":"String","id":"String"}
+	"alarm_close":{"type":"String","id":"String"}
+	"alarm_open":{"type":"String","id":"String"}
+	"alarm_modify":{"type":"String","id":"String","timestamp":"Integer","circle":"Integer","volume":"Integer","event":"String","extra":"String","behavior":"String","ringtone_query":"String","ringtone_type":"String","display_txt":"String","time_reminder":"String"}
+	"create":{"type":"String","timestamp":"Integer","circle":"Integer","volume":"Integer","event":"String","extra":"String","behavior":"String","ringtone_query":"String","ringtone_type":"String","display_txt":"String","time_reminder":"String"}
+	"query":{"type":"String"}
+	"delete":{"type":"String","id":"String"}
+	"close":{"type":"String","id":"String"}
+	"open":{"type":"String","id":"String"}
+	"modify":{"type":"String","id":"String","timestamp":"Integer","circle":"Integer","volume":"Integer","event":"String","extra":"String","behavior":"String","ringtone_query":"String","ringtone_type":"String","display_txt":"String","time_reminder":"String"}
+	"micmute":{"hour":"Integer","minute":"Integer","second":"Integer"}
+	"micmute_remove":{}

@@ -1,0 +1,58 @@
+#!/bin/sh /etc/rc.common
+START=11
+STOP=97
+
+USE_PROCD=1
+
+sync_broadinfo() {
+    KEYPATH=/sys/class/unifykeys
+    if [ ! -f "/data/etc/binfo" ]; then
+	echo "deviceid" > $KEYPATH/name
+	sn=`cat $KEYPATH/read`
+	echo "didkey" > $KEYPATH/name
+	res=`cat $KEYPATH/read`
+	miio_did=`echo $res | cut -d '|' -f 2`
+        miio_key=`echo $res | cut -d '|' -f 3`
+	echo "mac_wifi" > $KEYPATH/name
+	mac_wifi=`cat $KEYPATH/read`
+	echo "mac_bt" > $KEYPATH/name
+	mac_bt=`cat $KEYPATH/read`
+	echo 'config binfo "binfo"' > /data/etc/binfo
+	uci -c /data/etc -q batch <<EOF
+	set binfo.binfo.sn=$sn
+	set binfo.binfo.mac_wifi=$mac_wifi
+	set binfo.binfo.mac_bt=$mac_bt
+	set binfo.binfo.miio_did=$miio_did
+	set binfo.binfo.miio_key=$miio_key
+	commit binfo
+EOF
+    fi
+
+	_DIRAC_CONF_PATH=/etc/diracmobile.config
+	[ -e "/data"$_DIRAC_CONF_PATH ] || ln -s $_DIRAC_CONF_PATH /data$_DIRAC_CONF_PATH
+}
+
+start_service() {
+	if [ ! -d /data ]; then
+		echo Create data folder ...
+		/bin/mkdir /data
+		/bin/chmod 777 /data
+	fi
+	/usr/sbin/ubiattach -p /dev/mtd5
+	/bin/mount -t ubifs /dev/ubi1_0 /data/
+	if [ $? != 0 ]; then
+		echo echo Mount data partition is failed, so format it ...
+		/usr/sbin/ubidetach -p /dev/mtd5
+		/usr/sbin/flash_eraseall /dev/mtd5
+		/usr/sbin/ubiattach -p /dev/mtd5
+		/usr/sbin/ubimkvol -N data -m /dev/ubi1
+		/bin/mount -t ubifs /dev/ubi1_0 /data/
+	fi
+	mkdir -p /data/etc
+	sync_broadinfo
+}
+
+stop_service() {
+	/bin/umount /data
+	/usr/sbin/ubidettach -p /dev/mtd5
+}

@@ -1,0 +1,4 @@
+'nightmode' @1cb6eb2d
+	"set":{"total":"String","light":"String","volume":"String","start":"String","stop":"String"}
+	"status":{}
+	"current":{}

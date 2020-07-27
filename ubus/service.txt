@@ -1,0 +1,12 @@
+'service' @ee67d7e0
+	"set":{"name":"String","script":"String","instances":"Table","triggers":"Array","validate":"Array","autostart":"Boolean"}
+	"add":{"name":"String","script":"String","instances":"Table","triggers":"Array","validate":"Array","autostart":"Boolean"}
+	"list":{"name":"String","verbose":"Boolean"}
+	"delete":{"name":"String","instance":"String"}
+	"signal":{"name":"String","instance":"String","signal":"Integer"}
+	"update_start":{"name":"String"}
+	"update_complete":{"name":"String"}
+	"event":{"type":"String","data":"Table"}
+	"validate":{"package":"String","type":"String","service":"String"}
+	"get_data":{"name":"String","instance":"String","type":"String"}
+	"state":{"spawn":"Boolean","name":"String"}
